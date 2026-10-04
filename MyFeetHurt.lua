@@ -5,18 +5,18 @@ local ADDON_NAME = "MyFeetHurt"
 -- ============================================================
 local CONFIG = {
     -- Window dimensions & layout
-    WINDOW_WIDTH = 300,
-    WINDOW_HEIGHT = 280,
+    WINDOW_WIDTH = 320,
+    WINDOW_HEIGHT = 440,
     ROW_SPACING = -2,          -- Vertical space between text rows
-    TOP_PADDING = -28,         -- Distance from top of window to first text row
+    TOP_PADDING = -32,         -- Distance from top of window to first text row
     BUTTON_BOTTOM_PADDING = 8, -- Distance of the bottom buttons from window edge
 
     -- Color themes (Hex codes without the leading '|c' or with it depending on usage)
     COLOR_ALLIANCE = "FF0070DE",
     COLOR_HORDE = "FFFF2020",
-    COLOR_TOTALS = "FFFFFFFF",       -- Color for main totals (Walked, Ridden, Flown, Swum, Fallen)
+    COLOR_TOTALS = "FFFFFFFF",       -- Color for main totals (Walked, Ridden, Flown, Swum, Airborne, Public Transport)
     COLOR_SUBTOTALS = "FFE6B800",    -- Color for general sub-stats (Alive, Dead, Unmounted, Mounted)
-    COLOR_FALLEN_SUB = "FFCC9900",   -- Special sub-color for fallen alive/dead details
+    COLOR_AIRBORNE_SUB = "FFCC9900", -- Special sub-color for sub-details
 }
 
 -- ============================================================
@@ -29,19 +29,25 @@ local DEFAULT_DB = {
     milesWalkedDead = 0,
     milesFlown = 0,
     milesRidden = 0,
+    milesBoats = 0,
+    milesBoatsAlive = 0,
+    milesBoatsDead = 0,
     milesSwum = 0,
     milesSwumUnmounted = 0,
+    milesSwumUnmountedAlive = 0,
+    milesSwumUnmountedDead = 0,
     milesSwumMounted = 0,
-    milesFallen = 0,
-    milesFallenAlive = 0,
-    milesFallenDead = 0,
-    milesFallenUnmounted = 0,
-    milesFallenMounted = 0,
+    milesAirborne = 0,
+    milesAirborneAlive = 0,
+    milesAirborneDead = 0,
+    milesAirborneUnmounted = 0,
+    milesAirborneMounted = 0,
     walkedMilestone = 0,
     riddenMilestone = 0,
     flownMilestone = 0,
+    boatsMilestone = 0,
     swumMilestone = 0,
-    fallenMilestone = 0,
+    airborneMilestone = 0,
     travelledMilestone = 0,
 }
 
@@ -53,6 +59,16 @@ local DEFAULT_SETTINGS = {
 local function InitializeSavedVariables()
     MyFeetHurtDB = MyFeetHurtDB or {}
     MyFeetHurtSettings = MyFeetHurtSettings or {}
+
+    -- Backwards compatibility: Migrate old fallen stats to airborne if they exist
+    if MyFeetHurtDB.milesFallen ~= nil and MyFeetHurtDB.milesAirborne == nil then
+        MyFeetHurtDB.milesAirborne = MyFeetHurtDB.milesFallen
+        MyFeetHurtDB.milesAirborneAlive = MyFeetHurtDB.milesFallenAlive
+        MyFeetHurtDB.milesAirborneDead = MyFeetHurtDB.milesFallenDead
+        MyFeetHurtDB.milesAirborneUnmounted = MyFeetHurtDB.milesFallenUnmounted
+        MyFeetHurtDB.milesAirborneMounted = MyFeetHurtDB.milesFallenMounted
+        MyFeetHurtDB.airborneMilestone = MyFeetHurtDB.fallenMilestone or 0
+    end
 
     for key, value in pairs(DEFAULT_DB) do
         if MyFeetHurtDB[key] == nil then
@@ -75,18 +91,32 @@ local function ReconcileStats()
         db.milesWalkedAlive = (db.milesWalkedAlive or 0) + walkedGap
     end
 
-    local fallenGapAliveDead = (db.milesFallen or 0) - ((db.milesFallenAlive or 0) + (db.milesFallenDead or 0))
-    if fallenGapAliveDead > 0 and (db.milesFallenAlive == 0 and db.milesFallenDead == 0) then
-        db.milesFallenAlive = (db.milesFallen or 0)
-    elseif fallenGapAliveDead > 0 then
-        db.milesFallenAlive = (db.milesFallenAlive or 0) + fallenGapAliveDead
+    local boatsGapAliveDead = (db.milesBoats or 0) - ((db.milesBoatsAlive or 0) + (db.milesBoatsDead or 0))
+    if boatsGapAliveDead > 0 and (db.milesBoatsAlive == 0 and db.milesBoatsDead == 0) then
+        db.milesBoatsAlive = (db.milesBoats or 0)
+    elseif boatsGapAliveDead > 0 then
+        db.milesBoatsAlive = (db.milesBoatsAlive or 0) + boatsGapAliveDead
     end
 
-    local fallenGapUnmountMount = (db.milesFallen or 0) - ((db.milesFallenUnmounted or 0) + (db.milesFallenMounted or 0))
-    if fallenGapUnmountMount > 0 and (db.milesFallenUnmounted == 0 and db.milesFallenMounted == 0) then
-        db.milesFallenUnmounted = (db.milesFallen or 0)
-    elseif fallenGapUnmountMount > 0 then
-        db.milesFallenUnmounted = (db.milesFallenUnmounted or 0) + fallenGapUnmountMount
+    local airborneGapAliveDead = (db.milesAirborne or 0) - ((db.milesAirborneAlive or 0) + (db.milesAirborneDead or 0))
+    if airborneGapAliveDead > 0 and (db.milesAirborneAlive == 0 and db.milesAirborneDead == 0) then
+        db.milesAirborneAlive = (db.milesAirborne or 0)
+    elseif airborneGapAliveDead > 0 then
+        db.milesAirborneAlive = (db.milesAirborneAlive or 0) + airborneGapAliveDead
+    end
+
+    local airborneGapUnmountMount = (db.milesAirborne or 0) - ((db.milesAirborneUnmounted or 0) + (db.milesAirborneMounted or 0))
+    if airborneGapUnmountMount > 0 and (db.milesAirborneUnmounted == 0 and db.milesAirborneMounted == 0) then
+        db.milesAirborneUnmounted = (db.milesAirborne or 0)
+    elseif airborneGapUnmountMount > 0 then
+        db.milesAirborneUnmounted = (db.milesAirborneUnmounted or 0) + airborneGapUnmountMount
+    end
+
+    local swumUnmountGapAliveDead = (db.milesSwumUnmounted or 0) - ((db.milesSwumUnmountedAlive or 0) + (db.milesSwumUnmountedDead or 0))
+    if swumUnmountGapAliveDead > 0 and (db.milesSwumUnmountedAlive == 0 and db.milesSwumUnmountedDead == 0) then
+        db.milesSwumUnmountedAlive = (db.milesSwumUnmounted or 0)
+    elseif swumUnmountGapAliveDead > 0 then
+        db.milesSwumUnmountedAlive = (db.milesSwumUnmountedAlive or 0) + swumUnmountGapAliveDead
     end
 end
 
@@ -101,7 +131,7 @@ frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 local distanceTracker = CreateFrame("Frame")
 
 local lastUpdate = 0
-local updateInterval = 0.2
+local updateInterval = 0.04
 local lastY, lastX, lastZ = nil, nil, nil
 local YARDS_TO_MILES = 1 / 1760
 local MILES_TO_KM = 1.609344
@@ -143,15 +173,12 @@ local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, con
         local msg = string.format("My Feet Hurt: Congratulations!! You've %s %d %s! - Keep on %s!!", pastMethod, nextM, unitName, continuousMethod)
         local coloredMsg = string.format("|c%s%s|r", factionHex, msg)
         
-        -- Print to chat
         print(coloredMsg)
         
-        -- Display as Raid Warning banner across the middle of the screen
         if RaidNotice_AddMessage and RaidWarningFrame then
             RaidNotice_AddMessage(RaidWarningFrame, coloredMsg, ChatTypeInfo["RAID_WARNING"])
         end
         
-        -- Play sound ID 5274 (Queue Pop / Ready Check chime)
         PlaySound(5274, "Master")
 
         MyFeetHurtDB[milestoneKey] = nextM
@@ -165,10 +192,11 @@ local function CheckAllMilestones()
     CheckAndNotifyMilestones("walkedMilestone", db.milesWalked or 0, "walked", "walking")
     CheckAndNotifyMilestones("riddenMilestone", db.milesRidden or 0, "ridden", "riding")
     CheckAndNotifyMilestones("flownMilestone", db.milesFlown or 0, "flown", "flying")
+    CheckAndNotifyMilestones("boatsMilestone", db.milesBoats or 0, "used public transportation", "traveling via public transport")
     CheckAndNotifyMilestones("swumMilestone", db.milesSwum or 0, "swum", "swimming")
-    CheckAndNotifyMilestones("fallenMilestone", db.milesFallen or 0, "fallen", "falling")
+    CheckAndNotifyMilestones("airborneMilestone", db.milesAirborne or 0, "been airborne", "jumping and falling")
 
-    local totalBaseMiles = (db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesSwum or 0) + (db.milesFallen or 0)
+    local totalBaseMiles = (db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesBoats or 0) + (db.milesSwum or 0) + (db.milesAirborne or 0)
     CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
 end
 
@@ -186,7 +214,7 @@ local function RecalculateGlobalValues()
     local useKm = MyFeetHurtSettings and MyFeetHurtSettings.useKm
     local unitName = useKm and "Km" or "Miles"
     local factor = useKm and MILES_TO_KM or 1
-    local travelledTotal = ((db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesSwum or 0) + (db.milesFallen or 0)) * factor
+    local travelledTotal = ((db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesBoats or 0) + (db.milesSwum or 0) + (db.milesAirborne or 0)) * factor
 
     if unitButton then
         unitButton:SetText(useKm and "Switch to Miles" or "Switch to Km")
@@ -207,14 +235,19 @@ local function RecalculateGlobalValues()
         string.format("|c%sDead: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesWalkedDead or 0) * factor, unitName),
         string.format("|c%sRidden: %.2f %s|r", CONFIG.COLOR_TOTALS, (db.milesRidden or 0) * factor, unitName),
         string.format("|c%sFlown: %.2f %s|r", CONFIG.COLOR_TOTALS, (db.milesFlown or 0) * factor, unitName),
+        string.format("|c%sPublic Transport Total: %.2f %s|r", CONFIG.COLOR_TOTALS, (db.milesBoats or 0) * factor, unitName),
+        string.format("|c%sAlive: %.2f %s|r", CONFIG.COLOR_AIRBORNE_SUB, (db.milesBoatsAlive or 0) * factor, unitName),
+        string.format("|c%sDead: %.2f %s|r", CONFIG.COLOR_AIRBORNE_SUB, (db.milesBoatsDead or 0) * factor, unitName),
         string.format("|c%sSwum Total: %.2f %s|r", CONFIG.COLOR_TOTALS, (db.milesSwum or 0) * factor, unitName),
         string.format("|c%sUnmounted: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesSwumUnmounted or 0) * factor, unitName),
+        string.format("|c%sAlive: %.2f %s|r", CONFIG.COLOR_AIRBORNE_SUB, (db.milesSwumUnmountedAlive or 0) * factor, unitName),
+        string.format("|c%sDead: %.2f %s|r", CONFIG.COLOR_AIRBORNE_SUB, (db.milesSwumUnmountedDead or 0) * factor, unitName),
         string.format("|c%sMounted: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesSwumMounted or 0) * factor, unitName),
-        string.format("|c%sFallen Total: %.2f %s|r", CONFIG.COLOR_TOTALS, (db.milesFallen or 0) * factor, unitName),
-        string.format("|c%sUnmounted: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesFallenUnmounted or 0) * factor, unitName),
-        string.format("|c%sAlive: %.2f %s|r", CONFIG.COLOR_FALLEN_SUB, (db.milesFallenAlive or 0) * factor, unitName),
-        string.format("|c%sDead: %.2f %s|r", CONFIG.COLOR_FALLEN_SUB, (db.milesFallenDead or 0) * factor, unitName),
-        string.format("|c%sMounted: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesFallenMounted or 0) * factor, unitName),
+        string.format("|c%sAirborne Total: %.2f %s|r", CONFIG.COLOR_TOTALS, (db.milesAirborne or 0) * factor, unitName),
+        string.format("|c%sUnmounted: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesAirborneUnmounted or 0) * factor, unitName),
+        string.format("|c%sAlive: %.2f %s|r", CONFIG.COLOR_AIRBORNE_SUB, (db.milesAirborneAlive or 0) * factor, unitName),
+        string.format("|c%sDead: %.2f %s|r", CONFIG.COLOR_AIRBORNE_SUB, (db.milesAirborneDead or 0) * factor, unitName),
+        string.format("|c%sMounted: %.2f %s|r", CONFIG.COLOR_SUBTOTALS, (db.milesAirborneMounted or 0) * factor, unitName),
         string.format(factionHex .. "Travelled Total: %.2f %s|r", travelledTotal, unitName),
     }
 
@@ -246,7 +279,6 @@ local function CreateMyFeetHurtUI()
         return
     end
 
-    -- Main Stats Panel (Uses CONFIG values)
     local panel = CreateFrame("Frame", "MyFeetHurtUI", UIParent, "BackdropTemplate")
     panel:SetSize(CONFIG.WINDOW_WIDTH, CONFIG.WINDOW_HEIGHT)
     panel:SetPoint("CENTER")
@@ -279,16 +311,15 @@ local function CreateMyFeetHurtUI()
     closeBtn:SetScript("OnEnter", function() closeText:SetTextColor(1, 0.2, 0.2) end)
     closeBtn:SetScript("OnLeave", function() closeText:SetTextColor(1, 1, 1) end)
 
-    -- Title Header
     titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     titleText:SetPoint("TOP", panel, "TOP", 0, -8)
     titleText:SetText("My Feet Hurt")
 
-    for i = 1, 15 do
+    for i = 1, 20 do
         local fontObj = "GameFontNormal"
-        if i == 1 then
-            fontObj = "GameFontHighlight"
-        elseif i == 15 then
+        if i == 1 or i == 20 then
+            fontObj = "GameFontHighlightLarge"
+        elseif i == 2 or i == 5 or i == 6 or i == 7 or i == 10 or i == 15 then
             fontObj = "GameFontNormalLarge"
         end
 
@@ -302,7 +333,6 @@ local function CreateMyFeetHurtUI()
         statTexts[i] = fs
     end
 
-    -- Unit toggle button (Left side of bottom bar)
     unitButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     unitButton:SetSize(130, 22)
     unitButton:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 15, CONFIG.BUTTON_BOTTOM_PADDING)
@@ -312,7 +342,7 @@ local function CreateMyFeetHurtUI()
         local newUseKm = MyFeetHurtSettings.useKm
 
         local ratio = newUseKm and MILES_TO_KM or (1 / MILES_TO_KM)
-        for _, key in ipairs({"walkedMilestone", "riddenMilestone", "flownMilestone", "swumMilestone", "fallenMilestone", "travelledMilestone"}) do
+        for _, key in ipairs({"walkedMilestone", "riddenMilestone", "flownMilestone", "boatsMilestone", "swumMilestone", "airborneMilestone", "travelledMilestone"}) do
             if MyFeetHurtDB[key] and MyFeetHurtDB[key] > 0 then
                 MyFeetHurtDB[key] = MyFeetHurtDB[key] * ratio
             end
@@ -321,7 +351,6 @@ local function CreateMyFeetHurtUI()
         RecalculateGlobalValues()
     end)
 
-    -- Reset All button (Right side of bottom bar)
     local resetButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     resetButton:SetSize(130, 22)
     resetButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -15, CONFIG.BUTTON_BOTTOM_PADDING)
@@ -336,7 +365,6 @@ local function CreateMyFeetHurtUI()
 
     panel:SetScript("OnShow", RecalculateGlobalValues)
 
-    -- Draggable Minimap Button
     local minimapButton = CreateFrame("Button", "MyFeetHurtMinimapButton", Minimap)
     minimapButton:SetSize(31, 31)
     minimapButton:SetFrameStrata("MEDIUM")
@@ -400,20 +428,25 @@ local function CreateMyFeetHurtUI()
         local unitName = useKm and "Km" or "Miles"
         local factor = useKm and MILES_TO_KM or 1
 
-        local walkedTotal  = (db.milesWalked or 0) * factor
-        local walkedAlive  = (db.milesWalkedAlive or 0) * factor
-        local walkedDead   = (db.milesWalkedDead or 0) * factor
-        local ridden       = (db.milesRidden or 0) * factor
-        local flown        = (db.milesFlown or 0) * factor
-        local swumTotal    = (db.milesSwum or 0) * factor
-        local swumUnmount  = (db.milesSwumUnmounted or 0) * factor
-        local swumMount    = (db.milesSwumMounted or 0) * factor
-        local fallenTotal  = (db.milesFallen or 0) * factor
-        local fallenUnm    = (db.milesFallenUnmounted or 0) * factor
-        local fallenAlive  = (db.milesFallenAlive or 0) * factor
-        local fallenDead   = (db.milesFallenDead or 0) * factor
-        local fallenMnt    = (db.milesFallenMounted or 0) * factor
-        local travelled    = (walkedTotal + ridden + flown + swumTotal + fallenTotal)
+        local walkedTotal     = (db.milesWalked or 0) * factor
+        local walkedAlive     = (db.milesWalkedAlive or 0) * factor
+        local walkedDead      = (db.milesWalkedDead or 0) * factor
+        local ridden          = (db.milesRidden or 0) * factor
+        local flown           = (db.milesFlown or 0) * factor
+        local boatsTotal      = (db.milesBoats or 0) * factor
+        local boatsAlive      = (db.milesBoatsAlive or 0) * factor
+        local boatsDead       = (db.milesBoatsDead or 0) * factor
+        local swumTotal       = (db.milesSwum or 0) * factor
+        local swumUnm         = (db.milesSwumUnmounted or 0) * factor
+        local swumUnmAlive    = (db.milesSwumUnmountedAlive or 0) * factor
+        local swumUnmDead     = (db.milesSwumUnmountedDead or 0) * factor
+        local swumMount       = (db.milesSwumMounted or 0) * factor
+        local airborneTotal   = (db.milesAirborne or 0) * factor
+        local airborneUnm     = (db.milesAirborneUnmounted or 0) * factor
+        local airborneAlive   = (db.milesAirborneAlive or 0) * factor
+        local airborneDead    = (db.milesAirborneDead or 0) * factor
+        local airborneMnt     = (db.milesAirborneMounted or 0) * factor
+        local travelled       = (walkedTotal + ridden + flown + boatsTotal + swumTotal + airborneTotal)
 
         local faction = UnitFactionGroup("player")
         local fr, fg, fb = 0, 0.44, 0.87
@@ -429,14 +462,19 @@ local function CreateMyFeetHurtUI()
         GameTooltip:AddDoubleLine("   Dead:", string.format("%.2f %s", walkedDead, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
         GameTooltip:AddDoubleLine("Ridden:", string.format("%.2f %s", ridden, unitName), 1, 1, 1, 1, 1, 1)
         GameTooltip:AddDoubleLine("Flown:", string.format("%.2f %s", flown, unitName), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine("Public Transport Total:", string.format("%.2f %s", boatsTotal, unitName), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine("   Alive:", string.format("%.2f %s", boatsAlive, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
+        GameTooltip:AddDoubleLine("   Dead:", string.format("%.2f %s", boatsDead, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
         GameTooltip:AddDoubleLine("Swum Total:", string.format("%.2f %s", swumTotal, unitName), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("   Unmounted:", string.format("%.2f %s", swumUnmount, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
+        GameTooltip:AddDoubleLine("   Unmounted:", string.format("%.2f %s", swumUnm, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
+        GameTooltip:AddDoubleLine("      Alive:", string.format("%.2f %s", swumUnmAlive, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
+        GameTooltip:AddDoubleLine("      Dead:", string.format("%.2f %s", swumUnmDead, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
         GameTooltip:AddDoubleLine("   Mounted:", string.format("%.2f %s", swumMount, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("Fallen Total:", string.format("%.2f %s", fallenTotal, unitName), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("   Unmounted:", string.format("%.2f %s", fallenUnm, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("      Alive:", string.format("%.2f %s", fallenAlive, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("      Dead:", string.format("%.2f %s", fallenDead, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("   Mounted:", string.format("%.2f %s", fallenMnt, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
+        GameTooltip:AddDoubleLine("Airborne Total:", string.format("%.2f %s", airborneTotal, unitName), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine("   Unmounted:", string.format("%.2f %s", airborneUnm, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
+        GameTooltip:AddDoubleLine("      Alive:", string.format("%.2f %s", airborneAlive, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
+        GameTooltip:AddDoubleLine("      Dead:", string.format("%.2f %s", airborneDead, unitName), 0.8, 0.6, 0, 0.8, 0.6, 0)
+        GameTooltip:AddDoubleLine("   Mounted:", string.format("%.2f %s", airborneMnt, unitName), 0.9, 0.7, 0, 0.9, 0.7, 0)
         GameTooltip:AddLine(" ")
         GameTooltip:AddDoubleLine("Travelled Total:", string.format("%.2f %s", travelled, unitName), fr, fg, fb, fr, fg, fb)
         GameTooltip:AddLine(" ")
@@ -473,6 +511,10 @@ end)
 -- Distance tracking
 -- ============================================================
 
+local lastUpdate = 0
+local updateInterval = 0.04  -- High-precision tick rate (~25 updates per second)
+local isOnBoatState = false  -- State machine for boat/zeppelin tracking
+
 distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     lastUpdate = lastUpdate + elapsed
     if lastUpdate < updateInterval then return end
@@ -482,6 +524,20 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     end
 
     if not InCombatLockdown() then
+        local legSpeed = GetUnitSpeed("player") or 0
+        local isWalking = legSpeed > 0
+        
+        local isOnTaxi = UnitOnTaxi("player")
+        
+        local isFlying = false
+        if type(IsFlying) == "function" then isFlying = IsFlying() end
+        
+        local isSwimming = false
+        if type(IsSwimming) == "function" then isSwimming = IsSwimming() end
+
+        local isFallingNative = false
+        if type(IsFalling) == "function" then isFallingNative = IsFalling() end
+
         local currentY, currentX, currentZ = UnitPosition("player")
 
         if currentY and currentX and currentZ and lastY and lastX and lastZ then
@@ -489,51 +545,104 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
             local dx = currentX - lastX
             local dz = currentZ - lastZ
             local distanceYards = math.sqrt(dx*dx + dy*dy + dz*dz)
-
-            if distanceYards > 0.01 and distanceYards < 150 then
+            
+            if distanceYards > 0.001 and distanceYards < 150 then
                 local distanceMiles = distanceYards * YARDS_TO_MILES
+                local actualSpeed = distanceYards / lastUpdate
                 
-                local isFallingNow = IsFalling() or (dz < -0.2 and not IsSwimming() and not UnitOnTaxi("player"))
+                local isAirborneNow = false
+                if not isFlying and not isSwimming and not isOnTaxi then
+                    isAirborneNow = isFallingNative
+                end
 
-                if UnitOnTaxi("player") then
+                local speedDiff = math.abs(actualSpeed - legSpeed)
+                if isSwimming or isFlying or isOnTaxi or isAirborneNow then
+                    isOnBoatState = false
+                elseif speedDiff > 4.0 then
+                    isOnBoatState = true
+                elseif speedDiff < 1.0 then
+                    isOnBoatState = false
+                end
+
+                if isOnTaxi then
                     MyFeetHurtDB.milesFlown = (MyFeetHurtDB.milesFlown or 0) + distanceMiles
                     CheckAndNotifyMilestones("flownMilestone", MyFeetHurtDB.milesFlown, "flown", "flying")
-                elseif IsSwimming() then
+                
+                elseif isOnBoatState then
+                    MyFeetHurtDB.milesBoats = (MyFeetHurtDB.milesBoats or 0) + distanceMiles
+                    if UnitIsDeadOrGhost("player") then
+                        MyFeetHurtDB.milesBoatsDead = (MyFeetHurtDB.milesBoatsDead or 0) + distanceMiles
+                    else
+                        MyFeetHurtDB.milesBoatsAlive = (MyFeetHurtDB.milesBoatsAlive or 0) + distanceMiles
+                    end
+                    CheckAndNotifyMilestones("boatsMilestone", MyFeetHurtDB.milesBoats, "used public transportation", "traveling via public transport")
+
+                    if isWalking then
+                        local legDistanceMiles = (legSpeed * lastUpdate) * YARDS_TO_MILES
+                        
+                        if IsMounted() then
+                            MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + legDistanceMiles
+                            CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+                        else
+                            MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + legDistanceMiles
+                            if UnitIsDeadOrGhost("player") then
+                                MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + legDistanceMiles
+                            else
+                                MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + legDistanceMiles
+                            end
+                            CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
+                        end
+                    end
+
+                elseif isSwimming then
                     MyFeetHurtDB.milesSwum = (MyFeetHurtDB.milesSwum or 0) + distanceMiles
                     if IsMounted() then
                         MyFeetHurtDB.milesSwumMounted = (MyFeetHurtDB.milesSwumMounted or 0) + distanceMiles
                     else
                         MyFeetHurtDB.milesSwumUnmounted = (MyFeetHurtDB.milesSwumUnmounted or 0) + distanceMiles
+                        if UnitIsDeadOrGhost("player") then
+                            MyFeetHurtDB.milesSwumUnmountedDead = (MyFeetHurtDB.milesSwumUnmountedDead or 0) + distanceMiles
+                        else
+                            MyFeetHurtDB.milesSwumUnmountedAlive = (MyFeetHurtDB.milesSwumUnmountedAlive or 0) + distanceMiles
+                        end
                     end
                     CheckAndNotifyMilestones("swumMilestone", MyFeetHurtDB.milesSwum, "swum", "swimming")
-                elseif isFallingNow then
-                    MyFeetHurtDB.milesFallen = (MyFeetHurtDB.milesFallen or 0) + distanceMiles
-                    if UnitIsDeadOrGhost("player") then
-                        MyFeetHurtDB.milesFallenDead = (MyFeetHurtDB.milesFallenDead or 0) + distanceMiles
-                    else
-                        MyFeetHurtDB.milesFallenAlive = (MyFeetHurtDB.milesFallenAlive or 0) + distanceMiles
-                    end
-                    if IsMounted() then
-                        MyFeetHurtDB.milesFallenMounted = (MyFeetHurtDB.milesFallenMounted or 0) + distanceMiles
-                    else
-                        MyFeetHurtDB.milesFallenUnmounted = (MyFeetHurtDB.milesFallenUnmounted or 0) + distanceMiles
-                    end
-                    CheckAndNotifyMilestones("fallenMilestone", MyFeetHurtDB.milesFallen, "fallen", "falling")
-                elseif IsMounted() then
-                    MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + distanceMiles
-                    CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+
+                elseif isFlying then
+                    MyFeetHurtDB.milesFlown = (MyFeetHurtDB.milesFlown or 0) + distanceMiles
+                    CheckAndNotifyMilestones("flownMilestone", MyFeetHurtDB.milesFlown, "flown", "flying")
+
                 else
-                    MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + distanceMiles
-                    if UnitIsDeadOrGhost("player") then
-                        MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + distanceMiles
+                    if IsMounted() then
+                        MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + distanceMiles
+                        CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
                     else
-                        MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                        MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + distanceMiles
+                        if UnitIsDeadOrGhost("player") then
+                            MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + distanceMiles
+                        else
+                            MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                        end
+                        CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
                     end
-                    CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
+
+                    if isAirborneNow then
+                        MyFeetHurtDB.milesAirborne = (MyFeetHurtDB.milesAirborne or 0) + distanceMiles
+                        if UnitIsDeadOrGhost("player") then
+                            MyFeetHurtDB.milesAirborneDead = (MyFeetHurtDB.milesAirborneDead or 0) + distanceMiles
+                        else
+                            MyFeetHurtDB.milesAirborneAlive = (MyFeetHurtDB.milesAirborneAlive or 0) + distanceMiles
+                        end
+                        if IsMounted() then
+                            MyFeetHurtDB.milesAirborneMounted = (MyFeetHurtDB.milesAirborneMounted or 0) + distanceMiles
+                        else
+                            MyFeetHurtDB.milesAirborneUnmounted = (MyFeetHurtDB.milesAirborneUnmounted or 0) + distanceMiles
+                        end
+                        CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
+                    end
                 end
 
-                -- Check milestones for total combined travel as well
-                local totalBaseMiles = (MyFeetHurtDB.milesWalked or 0) + (MyFeetHurtDB.milesRidden or 0) + (MyFeetHurtDB.milesFlown or 0) + (MyFeetHurtDB.milesSwum or 0) + (MyFeetHurtDB.milesFallen or 0)
+                local totalBaseMiles = (MyFeetHurtDB.milesWalked or 0) + (MyFeetHurtDB.milesRidden or 0) + (MyFeetHurtDB.milesFlown or 0) + (MyFeetHurtDB.milesBoats or 0) + (MyFeetHurtDB.milesSwum or 0) + (MyFeetHurtDB.milesAirborne or 0)
                 CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
 
                 RecalculateGlobalValues()
