@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: My Feet Hurt
+## Notes: Tracks player KD, kills, deaths, and miles traveled.
+## SavedVariables: StatTrackerDB, StatTrackerSettings
+
+MyFeetHurt.lua
