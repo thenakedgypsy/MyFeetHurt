@@ -203,14 +203,14 @@ local ROW_PARENT = {
 local COLLAPSIBLE = { [2] = true, [7] = true, [10] = true, [11] = true, [15] = true, [16] = true }
 
 -- Formats a distance given in miles according to the current unit setting.
--- Miles: "x.xx Miles". Km mode: meters below 1 km, then "x.xx Km".
+-- Miles: "x.xx Miles". km mode: meters below 1 km, then "x.xx km".
 local function FormatDistance(miles)
     if MyFeetHurtSettings and MyFeetHurtSettings.useKm then
         local km = miles * MILES_TO_KM
         if km < 1 then
             return string.format("%.0f m", km * 1000)
         end
-        return string.format("%.2f Km", km)
+        return string.format("%.2f km", km)
     end
     return string.format("%.2f Miles", miles)
 end
@@ -289,7 +289,7 @@ end
 
 local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, continuousMethod)
     local useKm = MyFeetHurtSettings and MyFeetHurtSettings.useKm
-    local unitName = useKm and "Km" or "Miles"
+    local unitName = useKm and "km" or "Miles"
     local factor = useKm and MILES_TO_KM or 1
     local currentVal = baseMiles * factor
     local notify = not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false
@@ -802,7 +802,7 @@ local function CreateOptionsPanel()
         return cb
     end
 
-    local metricCheck = CreateCheckbox("Use metric units (Km)", header, -12)
+    local metricCheck = CreateCheckbox("Use metric units (km)", header, -12)
     metricCheck:SetScript("OnClick", function(self)
         SetUseKm(self:GetChecked() and true or false)
     end)
