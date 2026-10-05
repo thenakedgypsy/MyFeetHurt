@@ -12,6 +12,10 @@ local CONFIG = {
     BUTTON_BOTTOM_PADDING = 8, -- Distance of the bottom buttons from window edge
     CONTENT_BOTTOM_PADDING = 6, -- Gap between the last text row and the bottom button
 
+    -- Extra breathing room used only by the fancy window (ignored in Simple Window Mode)
+    FANCY_TOP_EXTRA = 6,        -- Extra space between the header line and the first row
+    FANCY_TOTALS_EXTRA = 8,     -- Extra space above the divider line over "Total Distance Travelled"
+
     -- Color themes (Hex codes without the leading '|c' or with it depending on usage)
     COLOR_ALLIANCE = "FF0070DE",
     COLOR_HORDE = "FFFF2020",
@@ -63,6 +67,39 @@ local DEFAULT_SETTINGS = {
     useKm = false,
     achievementNotifications = true,
     backgroundAlpha = 0.85,
+    simpleWindow = false,
+
+    -- Which stat types / subtypes are displayed in the tooltip (tip*) and window (show*).
+    -- Hiding a type also hides all of its subtypes.
+    tipWalking = true,
+    tipWalkingSub = true,
+    tipRiding = true,
+    tipFlight = true,
+    tipTransport = true,
+    tipTransportSub = true,
+    tipSwimming = true,
+    tipSwimUnmounted = true,
+    tipSwimUnmountedSub = true,
+    tipSwimMounted = true,
+    tipAirborne = true,
+    tipAirUnmounted = true,
+    tipAirUnmountedSub = true,
+    tipAirMounted = true,
+
+    showWalking = true,
+    showWalkingSub = true,            -- Walking: Alive / Dead
+    showRiding = true,
+    showFlight = true,
+    showTransport = true,
+    showTransportSub = true,          -- Public Transport: Alive / Dead
+    showSwimming = true,
+    showSwimUnmounted = true,
+    showSwimUnmountedSub = true,      -- Swimming Unmounted: Alive / Dead
+    showSwimMounted = true,
+    showAirborne = true,
+    showAirUnmounted = true,
+    showAirUnmountedSub = true,       -- Airborne Unmounted: Alive / Dead
+    showAirMounted = true,
 }
 
 local function InitializeSavedVariables()
@@ -148,6 +185,7 @@ local MILES_TO_KM = 1.609344
 local statTexts = {}
 local uiCreated = false
 local titleText -- Reference to window title
+local windowDecor = {} -- Decorative textures that are only visible when Simple Window Mode is off
 
 -- Collapse/expand support
 -- ROW_PARENT: row index -> index of the row that controls its visibility
@@ -177,10 +215,54 @@ local function FormatDistance(miles)
     return string.format("%.2f Miles", miles)
 end
 
+-- ROW_SETTING: row index -> setting that toggles whether the row is displayed
+local ROW_SETTING = {
+    [2] = "showWalking", [3] = "showWalkingSub", [4] = "showWalkingSub",
+    [5] = "showRiding",
+    [6] = "showFlight",
+    [7] = "showTransport", [8] = "showTransportSub", [9] = "showTransportSub",
+    [10] = "showSwimming", [11] = "showSwimUnmounted", [12] = "showSwimUnmountedSub", [13] = "showSwimUnmountedSub", [14] = "showSwimMounted",
+    [15] = "showAirborne", [16] = "showAirUnmounted", [17] = "showAirUnmountedSub", [18] = "showAirUnmountedSub", [19] = "showAirMounted",
+}
+
+local function IsSettingEnabled(key)
+    return not (MyFeetHurtSettings and MyFeetHurtSettings[key] == false)
+end
+
+-- ROW_CHILDREN: row index -> list of rows directly beneath it
+local ROW_CHILDREN = {}
+for child, parent in pairs(ROW_PARENT) do
+    ROW_CHILDREN[parent] = ROW_CHILDREN[parent] or {}
+    table.insert(ROW_CHILDREN[parent], child)
+end
+
+-- True if at least one subtype row under this row is enabled in the settings
+-- (ignores collapsing). Used to decide whether the [+]/[-] toggle is shown.
+local function HasVisibleChildren(i)
+    local children = ROW_CHILDREN[i]
+    if not children then return false end
+    for _, child in ipairs(children) do
+        local key = ROW_SETTING[child]
+        if not key or IsSettingEnabled(key) then
+            return true
+        end
+    end
+    return false
+end
+
 local function IsRowVisible(i)
+    local key = ROW_SETTING[i]
+    if key and not IsSettingEnabled(key) then
+        return false
+    end
+
     local parent = ROW_PARENT[i]
     while parent do
         if collapsedRows[parent] then
+            return false
+        end
+        key = ROW_SETTING[parent]
+        if key and not IsSettingEnabled(key) then
             return false
         end
         parent = ROW_PARENT[parent]
@@ -251,6 +333,66 @@ local function CheckAllMilestones()
 end
 
 -- ============================================================
+-- Window styling (fancy by default, original look in Simple Window Mode)
+-- ============================================================
+
+local SIMPLE_BACKDROP = {
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true,
+    tileSize = 16,
+    edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 },
+}
+
+local FANCY_BACKDROP = {
+    bgFile = "Interface\\Buttons\\WHITE8X8",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = false,
+    edgeSize = 16,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 },
+}
+
+local function ApplyWindowStyle()
+    local panel = MyFeetHurtUI
+    if not panel then return end
+
+    local alpha = MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha
+
+    layoutDirty = true -- Row spacing differs between fancy and simple mode
+
+    if MyFeetHurtSettings.simpleWindow then
+        panel:SetBackdrop(SIMPLE_BACKDROP)
+        panel:SetBackdropColor(0, 0, 0, alpha)
+        panel:SetBackdropBorderColor(1, 1, 1, 1)
+        for _, tex in pairs(windowDecor) do
+            tex:Hide()
+        end
+        return
+    end
+
+    local isHorde = UnitFactionGroup("player") == "Horde"
+    local fr, fg, fb = isHorde and 1 or 0, isHorde and 0.12 or 0.44, isHorde and 0.12 or 0.87
+
+    panel:SetBackdrop(FANCY_BACKDROP)
+    panel:SetBackdropColor(0.05, 0.06, 0.10, alpha)
+    panel:SetBackdropBorderColor(fr, fg, fb, 1)
+
+    if windowDecor.headerBar then
+        windowDecor.headerBar:SetColorTexture(fr, fg, fb, 0.25)
+        windowDecor.headerBar:Show()
+    end
+    if windowDecor.headerLine then
+        windowDecor.headerLine:SetColorTexture(fr, fg, fb, 0.9)
+        windowDecor.headerLine:Show()
+    end
+    if windowDecor.totalsLine then
+        windowDecor.totalsLine:SetColorTexture(fr, fg, fb, 0.6)
+        windowDecor.totalsLine:Show()
+    end
+end
+
+-- ============================================================
 -- Utility & UI Updates
 -- ============================================================
 
@@ -299,7 +441,7 @@ local function RecalculateGlobalValues()
         local fs = statTexts[i]
         if fs then
             local text = displayStrings[i]
-            if COLLAPSIBLE[i] then
+            if COLLAPSIBLE[i] and HasVisibleChildren(i) then
                 text = (collapsedRows[i] and "|cFFFFFFFF[+]|r " or "|cFFFFFFFF[-]|r ") .. text
             end
             if lastRowText[i] ~= text then
@@ -312,21 +454,34 @@ local function RecalculateGlobalValues()
     if layoutDirty then
         layoutDirty = false
 
+        local fancy = not MyFeetHurtSettings.simpleWindow
+        local topPadding = CONFIG.TOP_PADDING - (fancy and CONFIG.FANCY_TOP_EXTRA or 0)
+        local totalsExtra = fancy and CONFIG.FANCY_TOTALS_EXTRA or 0
+
         local previousRow
         local contentHeight = 0
         local visibleCount = 0
+        local extraHeight = 0
         for i = 1, #displayStrings do
             local fs = statTexts[i]
             if fs then
                 if IsRowVisible(i) then
                     fs:ClearAllPoints()
                     if previousRow then
-                        fs:SetPoint("TOP", previousRow, "BOTTOM", 0, CONFIG.ROW_SPACING)
+                        local extra = (i == 20) and totalsExtra or 0
+                        fs:SetPoint("TOP", previousRow, "BOTTOM", 0, CONFIG.ROW_SPACING - extra)
+                        extraHeight = extraHeight + extra
                     else
-                        fs:SetPoint("TOP", MyFeetHurtUI, "TOP", 0, CONFIG.TOP_PADDING)
+                        fs:SetPoint("TOP", MyFeetHurtUI, "TOP", 0, topPadding)
                     end
                     fs:Show()
-                    if toggleButtons[i] then toggleButtons[i]:Show() end
+                    if toggleButtons[i] then
+                        if HasVisibleChildren(i) then
+                            toggleButtons[i]:Show()
+                        else
+                            toggleButtons[i]:Hide()
+                        end
+                    end
                     previousRow = fs
                     contentHeight = contentHeight + fs:GetStringHeight()
                     visibleCount = visibleCount + 1
@@ -337,8 +492,9 @@ local function RecalculateGlobalValues()
             end
         end
 
-        local totalHeight = -CONFIG.TOP_PADDING
+        local totalHeight = -topPadding
             + contentHeight
+            + extraHeight
             + (visibleCount - 1) * -CONFIG.ROW_SPACING
             + CONFIG.CONTENT_BOTTOM_PADDING
             + CONFIG.BUTTON_BOTTOM_PADDING
@@ -376,15 +532,18 @@ local function CreateMyFeetHurtUI()
     panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
     panel:Hide()
 
-    panel:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true,
-        tileSize = 16,
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    panel:SetBackdropColor(0, 0, 0, MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha)
+    -- Header bar and divider behind the title (colors/visibility set in ApplyWindowStyle)
+    local headerBar = panel:CreateTexture(nil, "BORDER")
+    headerBar:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -4)
+    headerBar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -4, -4)
+    headerBar:SetHeight(26)
+    windowDecor.headerBar = headerBar
+
+    local headerLine = panel:CreateTexture(nil, "BORDER")
+    headerLine:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, -30)
+    headerLine:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -30)
+    headerLine:SetHeight(1)
+    windowDecor.headerLine = headerLine
 
     local closeBtn = CreateFrame("Button", nil, panel)
     closeBtn:SetSize(24, 24)
@@ -436,7 +595,16 @@ local function CreateMyFeetHurtUI()
         end
     end
 
+    -- Divider above the "Total Distance Travelled" rows
+    local totalsLine = panel:CreateTexture(nil, "BORDER")
+    totalsLine:SetPoint("BOTTOM", statTexts[20], "TOP", 0, CONFIG.FANCY_TOTALS_EXTRA / 2 + 1)
+    totalsLine:SetSize(200, 1)
+    windowDecor.totalsLine = totalsLine
+
+    ApplyWindowStyle()
+
     panel:SetScript("OnShow", function()
+        ApplyWindowStyle()
         layoutDirty = true
         RecalculateGlobalValues()
     end)
@@ -530,24 +698,52 @@ local function CreateMyFeetHurtUI()
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("My Feet Hurt", 1, 0.82, 0)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddDoubleLine("Walking:", FormatDistance(walkedTotal), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("   Alive:", FormatDistance(walkedAlive), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("   Dead:", FormatDistance(walkedDead), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("Riding:", FormatDistance(ridden), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Flight Path:", FormatDistance(flown), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Public Transport:", FormatDistance(boatsTotal), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("   Alive:", FormatDistance(boatsAlive), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("   Dead:", FormatDistance(boatsDead), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("Swimming:", FormatDistance(swumTotal), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("   Unmounted:", FormatDistance(swumUnm), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("      Alive:", FormatDistance(swumUnmAlive), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("      Dead:", FormatDistance(swumUnmDead), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("   Mounted:", FormatDistance(swumMount), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("Airborne:", FormatDistance(airborneTotal), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("   Unmounted:", FormatDistance(airborneUnm), 0.9, 0.7, 0, 0.9, 0.7, 0)
-        GameTooltip:AddDoubleLine("      Alive:", FormatDistance(airborneAlive), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("      Dead:", FormatDistance(airborneDead), 0.8, 0.6, 0, 0.8, 0.6, 0)
-        GameTooltip:AddDoubleLine("   Mounted:", FormatDistance(airborneMnt), 0.9, 0.7, 0, 0.9, 0.7, 0)
+        if IsSettingEnabled("tipWalking") then
+            GameTooltip:AddDoubleLine("Walking:", FormatDistance(walkedTotal), 1, 1, 1, 1, 1, 1)
+            if IsSettingEnabled("tipWalkingSub") then
+                GameTooltip:AddDoubleLine("   Alive:", FormatDistance(walkedAlive), 0.9, 0.7, 0, 0.9, 0.7, 0)
+                GameTooltip:AddDoubleLine("   Dead:", FormatDistance(walkedDead), 0.9, 0.7, 0, 0.9, 0.7, 0)
+            end
+        end
+        if IsSettingEnabled("tipRiding") then
+            GameTooltip:AddDoubleLine("Riding:", FormatDistance(ridden), 1, 1, 1, 1, 1, 1)
+        end
+        if IsSettingEnabled("tipFlight") then
+            GameTooltip:AddDoubleLine("Flight Path:", FormatDistance(flown), 1, 1, 1, 1, 1, 1)
+        end
+        if IsSettingEnabled("tipTransport") then
+            GameTooltip:AddDoubleLine("Public Transport:", FormatDistance(boatsTotal), 1, 1, 1, 1, 1, 1)
+            if IsSettingEnabled("tipTransportSub") then
+                GameTooltip:AddDoubleLine("   Alive:", FormatDistance(boatsAlive), 0.8, 0.6, 0, 0.8, 0.6, 0)
+                GameTooltip:AddDoubleLine("   Dead:", FormatDistance(boatsDead), 0.8, 0.6, 0, 0.8, 0.6, 0)
+            end
+        end
+        if IsSettingEnabled("tipSwimming") then
+            GameTooltip:AddDoubleLine("Swimming:", FormatDistance(swumTotal), 1, 1, 1, 1, 1, 1)
+            if IsSettingEnabled("tipSwimUnmounted") then
+                GameTooltip:AddDoubleLine("   Unmounted:", FormatDistance(swumUnm), 0.9, 0.7, 0, 0.9, 0.7, 0)
+                if IsSettingEnabled("tipSwimUnmountedSub") then
+                    GameTooltip:AddDoubleLine("      Alive:", FormatDistance(swumUnmAlive), 0.8, 0.6, 0, 0.8, 0.6, 0)
+                    GameTooltip:AddDoubleLine("      Dead:", FormatDistance(swumUnmDead), 0.8, 0.6, 0, 0.8, 0.6, 0)
+                end
+            end
+            if IsSettingEnabled("tipSwimMounted") then
+                GameTooltip:AddDoubleLine("   Mounted:", FormatDistance(swumMount), 0.9, 0.7, 0, 0.9, 0.7, 0)
+            end
+        end
+        if IsSettingEnabled("tipAirborne") then
+            GameTooltip:AddDoubleLine("Airborne:", FormatDistance(airborneTotal), 1, 1, 1, 1, 1, 1)
+            if IsSettingEnabled("tipAirUnmounted") then
+                GameTooltip:AddDoubleLine("   Unmounted:", FormatDistance(airborneUnm), 0.9, 0.7, 0, 0.9, 0.7, 0)
+                if IsSettingEnabled("tipAirUnmountedSub") then
+                    GameTooltip:AddDoubleLine("      Alive:", FormatDistance(airborneAlive), 0.8, 0.6, 0, 0.8, 0.6, 0)
+                    GameTooltip:AddDoubleLine("      Dead:", FormatDistance(airborneDead), 0.8, 0.6, 0, 0.8, 0.6, 0)
+                end
+            end
+            if IsSettingEnabled("tipAirMounted") then
+                GameTooltip:AddDoubleLine("   Mounted:", FormatDistance(airborneMnt), 0.9, 0.7, 0, 0.9, 0.7, 0)
+            end
+        end
         GameTooltip:AddLine(" ")
         GameTooltip:AddDoubleLine("Total Distance Travelled:", FormatDistance(travelled), fr, fg, fb, fr, fg, fb)
         GameTooltip:AddLine(" ")
@@ -595,12 +791,14 @@ local function CreateOptionsPanel()
     header:SetPoint("TOPLEFT", 16, -16)
     header:SetText("My Feet Hurt")
 
-    local function CreateCheckbox(label, anchor, yOffset)
+    local function CreateCheckbox(label, anchor, yOffset, xOffset)
         local cb = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOffset)
-        local text = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-        text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-        text:SetText(label)
+        cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", xOffset or 0, yOffset)
+        if label then
+            local text = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+            text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+            text:SetText(label)
+        end
         return cb
     end
 
@@ -614,8 +812,15 @@ local function CreateOptionsPanel()
         MyFeetHurtSettings.achievementNotifications = self:GetChecked() and true or false
     end)
 
+    local simpleCheck = CreateCheckbox("Simple window mode", notifyCheck, -4)
+    simpleCheck:SetScript("OnClick", function(self)
+        MyFeetHurtSettings.simpleWindow = self:GetChecked() and true or false
+        ApplyWindowStyle()
+        RecalculateGlobalValues()
+    end)
+
     local alphaSlider = CreateFrame("Slider", "MyFeetHurtAlphaSlider", options, "OptionsSliderTemplate")
-    alphaSlider:SetPoint("TOPLEFT", notifyCheck, "BOTTOMLEFT", 8, -28)
+    alphaSlider:SetPoint("TOPLEFT", simpleCheck, "BOTTOMLEFT", 8, -28)
     alphaSlider:SetWidth(220)
     alphaSlider:SetMinMaxValues(0, 1)
     alphaSlider:SetValueStep(0.05)
@@ -627,9 +832,7 @@ local function CreateOptionsPanel()
         value = math.floor(value * 20 + 0.5) / 20
         alphaLabel:SetText(string.format("Window background opacity: %d%%", value * 100))
         MyFeetHurtSettings.backgroundAlpha = value
-        if MyFeetHurtUI then
-            MyFeetHurtUI:SetBackdropColor(0, 0, 0, value)
-        end
+        ApplyWindowStyle()
     end)
 
     local resetButton = CreateFrame("Button", nil, options, "UIPanelButtonTemplate")
@@ -638,9 +841,79 @@ local function CreateOptionsPanel()
     resetButton:SetText("Reset Lifetime Stats")
     resetButton:SetScript("OnClick", ResetAllStats)
 
+    -- Display section: choose which types (left) and subtypes (right) are shown,
+    -- separately for the window and the tooltip
+    local displayHeader = options:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    displayHeader:SetPoint("TOPLEFT", resetButton, "BOTTOMLEFT", 4, -20)
+    displayHeader:SetText("Show in window and tooltip")
+
+    local displayChecks = {}
+    local function CreateDisplayColumn(entries, xOffset)
+        local anchor, yOffset, isFirst = displayHeader, -22, true
+        for _, entry in ipairs(entries) do
+            local windowKey, tipKey, label = entry[1], entry[2], entry[3]
+
+            local windowCheck = CreateCheckbox(nil, anchor, yOffset, xOffset)
+            windowCheck:SetScript("OnClick", function(self)
+                MyFeetHurtSettings[windowKey] = self:GetChecked() and true or false
+                layoutDirty = true
+                RecalculateGlobalValues()
+            end)
+
+            local tipCheck = CreateCheckbox(nil, windowCheck, 0)
+            tipCheck:ClearAllPoints()
+            tipCheck:SetPoint("LEFT", windowCheck, "RIGHT", 24, 0)
+            tipCheck:SetScript("OnClick", function(self)
+                MyFeetHurtSettings[tipKey] = self:GetChecked() and true or false
+            end)
+
+            local text = options:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+            text:SetPoint("LEFT", tipCheck, "RIGHT", 4, 0)
+            text:SetText(label)
+
+            if isFirst then
+                local windowLabel = options:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                windowLabel:SetPoint("BOTTOM", windowCheck, "TOP", 0, -4)
+                windowLabel:SetText("Window")
+                local tipLabel = options:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                tipLabel:SetPoint("BOTTOM", tipCheck, "TOP", 0, -4)
+                tipLabel:SetText("Tooltip")
+                isFirst = false
+            end
+
+            displayChecks[windowKey] = windowCheck
+            displayChecks[tipKey] = tipCheck
+            anchor, yOffset, xOffset = windowCheck, 0, 0
+        end
+    end
+
+    CreateDisplayColumn({
+        { "showWalking", "tipWalking", "Walking" },
+        { "showRiding", "tipRiding", "Riding" },
+        { "showFlight", "tipFlight", "Flight Path" },
+        { "showTransport", "tipTransport", "Public Transport" },
+        { "showSwimming", "tipSwimming", "Swimming" },
+        { "showAirborne", "tipAirborne", "Airborne" },
+    }, 0)
+
+    CreateDisplayColumn({
+        { "showWalkingSub", "tipWalkingSub", "Walking: Alive / Dead" },
+        { "showTransportSub", "tipTransportSub", "Public Transport: Alive / Dead" },
+        { "showSwimUnmounted", "tipSwimUnmounted", "Swimming: Unmounted" },
+        { "showSwimUnmountedSub", "tipSwimUnmountedSub", "Swimming Unmounted: Alive / Dead" },
+        { "showSwimMounted", "tipSwimMounted", "Swimming: Mounted" },
+        { "showAirUnmounted", "tipAirUnmounted", "Airborne: Unmounted" },
+        { "showAirUnmountedSub", "tipAirUnmountedSub", "Airborne Unmounted: Alive / Dead" },
+        { "showAirMounted", "tipAirMounted", "Airborne: Mounted" },
+    }, 230)
+
     options:SetScript("OnShow", function()
+        for key, cb in pairs(displayChecks) do
+            cb:SetChecked(MyFeetHurtSettings[key] ~= false)
+        end
         metricCheck:SetChecked(MyFeetHurtSettings.useKm and true or false)
         notifyCheck:SetChecked(MyFeetHurtSettings.achievementNotifications ~= false)
+        simpleCheck:SetChecked(MyFeetHurtSettings.simpleWindow and true or false)
         alphaSlider:SetValue(MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha)
     end)
 
