@@ -61,6 +61,8 @@ local DEFAULT_DB = {
 local DEFAULT_SETTINGS = {
     minimapPos = 220,
     useKm = false,
+    achievementNotifications = true,
+    backgroundAlpha = 0.85,
 }
 
 local function InitializeSavedVariables()
@@ -145,7 +147,6 @@ local MILES_TO_KM = 1.609344
 
 local statTexts = {}
 local uiCreated = false
-local unitButton
 local titleText -- Reference to window title
 
 -- Collapse/expand support
@@ -209,23 +210,26 @@ local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, con
     local unitName = useKm and "Km" or "Miles"
     local factor = useKm and MILES_TO_KM or 1
     local currentVal = baseMiles * factor
+    local notify = not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false
 
     local lastM = MyFeetHurtDB[milestoneKey] or 0
     local nextM = GetNextMilestone(lastM)
 
     while currentVal >= nextM do
-        local faction = UnitFactionGroup("player")
-        local factionHex = (faction == "Horde") and CONFIG.COLOR_HORDE or CONFIG.COLOR_ALLIANCE
-        local msg = string.format("My Feet Hurt: Congratulations!! You've %s %d %s! - Keep on %s!!", pastMethod, nextM, unitName, continuousMethod)
-        local coloredMsg = string.format("|c%s%s|r", factionHex, msg)
-        
-        print(coloredMsg)
-        
-        if RaidNotice_AddMessage and RaidWarningFrame then
-            RaidNotice_AddMessage(RaidWarningFrame, coloredMsg, ChatTypeInfo["RAID_WARNING"])
+        if notify then
+            local faction = UnitFactionGroup("player")
+            local factionHex = (faction == "Horde") and CONFIG.COLOR_HORDE or CONFIG.COLOR_ALLIANCE
+            local msg = string.format("My Feet Hurt: Congratulations!! You've %s %d %s! - Keep on %s!!", pastMethod, nextM, unitName, continuousMethod)
+            local coloredMsg = string.format("|c%s%s|r", factionHex, msg)
+            
+            print(coloredMsg)
+            
+            if RaidNotice_AddMessage and RaidWarningFrame then
+                RaidNotice_AddMessage(RaidWarningFrame, coloredMsg, ChatTypeInfo["RAID_WARNING"])
+            end
+            
+            PlaySound(5274, "Master")
         end
-        
-        PlaySound(5274, "Master")
 
         MyFeetHurtDB[milestoneKey] = nextM
         lastM = nextM
@@ -257,12 +261,7 @@ local function RecalculateGlobalValues()
 
     local db = MyFeetHurtDB
 
-    local useKm = MyFeetHurtSettings and MyFeetHurtSettings.useKm
     local travelledTotal = (db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesBoats or 0) + (db.milesSwum or 0) + (db.milesAirborne or 0)
-
-    if unitButton then
-        unitButton:SetText(useKm and "Imperial" or "Metric")
-    end
 
     local faction = UnitFactionGroup("player")
     local factionHex = (faction == "Horde") and ("|c" .. CONFIG.COLOR_HORDE) or ("|c" .. CONFIG.COLOR_ALLIANCE)
@@ -338,12 +337,10 @@ local function RecalculateGlobalValues()
             end
         end
 
-        local buttonHeight = unitButton and unitButton:GetHeight() or 22
         local totalHeight = -CONFIG.TOP_PADDING
             + contentHeight
             + (visibleCount - 1) * -CONFIG.ROW_SPACING
             + CONFIG.CONTENT_BOTTOM_PADDING
-            + buttonHeight
             + CONFIG.BUTTON_BOTTOM_PADDING
         MyFeetHurtUI:SetHeight(totalHeight)
     end
@@ -387,7 +384,7 @@ local function CreateMyFeetHurtUI()
         edgeSize = 16,
         insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    panel:SetBackdropColor(0, 0, 0, 0.85)
+    panel:SetBackdropColor(0, 0, 0, MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha)
 
     local closeBtn = CreateFrame("Button", nil, panel)
     closeBtn:SetSize(24, 24)
@@ -438,24 +435,6 @@ local function CreateMyFeetHurtUI()
             toggleButtons[i] = toggle
         end
     end
-
-    unitButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    unitButton:SetSize(130, 22)
-    unitButton:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 15, CONFIG.BUTTON_BOTTOM_PADDING)
-    unitButton:SetScript("OnClick", function()
-        local oldUseKm = MyFeetHurtSettings.useKm
-        MyFeetHurtSettings.useKm = not MyFeetHurtSettings.useKm
-        local newUseKm = MyFeetHurtSettings.useKm
-
-        local ratio = newUseKm and MILES_TO_KM or (1 / MILES_TO_KM)
-        for _, key in ipairs({"walkedMilestone", "riddenMilestone", "flownMilestone", "boatsMilestone", "swumMilestone", "airborneMilestone", "travelledMilestone"}) do
-            if MyFeetHurtDB[key] and MyFeetHurtDB[key] > 0 then
-                MyFeetHurtDB[key] = MyFeetHurtDB[key] * ratio
-            end
-        end
-
-        RecalculateGlobalValues()
-    end)
 
     panel:SetScript("OnShow", function()
         layoutDirty = true
@@ -582,6 +561,98 @@ local function CreateMyFeetHurtUI()
 end
 
 -- ============================================================
+-- Options Menu
+-- ============================================================
+
+local function SetUseKm(useKm)
+    if (MyFeetHurtSettings.useKm and true or false) == useKm then return end
+    MyFeetHurtSettings.useKm = useKm
+
+    -- Milestones are stored in the display unit, so convert them along with the switch
+    local ratio = useKm and MILES_TO_KM or (1 / MILES_TO_KM)
+    for _, key in ipairs({"walkedMilestone", "riddenMilestone", "flownMilestone", "boatsMilestone", "swumMilestone", "airborneMilestone", "travelledMilestone"}) do
+        if MyFeetHurtDB[key] and MyFeetHurtDB[key] > 0 then
+            MyFeetHurtDB[key] = MyFeetHurtDB[key] * ratio
+        end
+    end
+
+    RecalculateGlobalValues()
+end
+
+local function ResetAllStats()
+    for key, value in pairs(DEFAULT_DB) do
+        MyFeetHurtDB[key] = value
+    end
+    RecalculateGlobalValues()
+    print("|cFFFF0000[MyFeetHurt] All stats and milestones have been reset to 0!|r")
+end
+
+local function CreateOptionsPanel()
+    local options = CreateFrame("Frame")
+    options.name = "My Feet Hurt"
+
+    local header = options:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    header:SetPoint("TOPLEFT", 16, -16)
+    header:SetText("My Feet Hurt")
+
+    local function CreateCheckbox(label, anchor, yOffset)
+        local cb = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, yOffset)
+        local text = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+        text:SetText(label)
+        return cb
+    end
+
+    local metricCheck = CreateCheckbox("Use metric units (Km)", header, -12)
+    metricCheck:SetScript("OnClick", function(self)
+        SetUseKm(self:GetChecked() and true or false)
+    end)
+
+    local notifyCheck = CreateCheckbox("Enable achievement notifications", metricCheck, -4)
+    notifyCheck:SetScript("OnClick", function(self)
+        MyFeetHurtSettings.achievementNotifications = self:GetChecked() and true or false
+    end)
+
+    local alphaSlider = CreateFrame("Slider", "MyFeetHurtAlphaSlider", options, "OptionsSliderTemplate")
+    alphaSlider:SetPoint("TOPLEFT", notifyCheck, "BOTTOMLEFT", 8, -28)
+    alphaSlider:SetWidth(220)
+    alphaSlider:SetMinMaxValues(0, 1)
+    alphaSlider:SetValueStep(0.05)
+    if alphaSlider.SetObeyStepOnDrag then alphaSlider:SetObeyStepOnDrag(true) end
+    local alphaLabel = _G["MyFeetHurtAlphaSliderText"]
+    _G["MyFeetHurtAlphaSliderLow"]:SetText("0%")
+    _G["MyFeetHurtAlphaSliderHigh"]:SetText("100%")
+    alphaSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value * 20 + 0.5) / 20
+        alphaLabel:SetText(string.format("Window background opacity: %d%%", value * 100))
+        MyFeetHurtSettings.backgroundAlpha = value
+        if MyFeetHurtUI then
+            MyFeetHurtUI:SetBackdropColor(0, 0, 0, value)
+        end
+    end)
+
+    local resetButton = CreateFrame("Button", nil, options, "UIPanelButtonTemplate")
+    resetButton:SetSize(160, 22)
+    resetButton:SetPoint("TOPLEFT", alphaSlider, "BOTTOMLEFT", -4, -24)
+    resetButton:SetText("Reset Lifetime Stats")
+    resetButton:SetScript("OnClick", ResetAllStats)
+
+    options:SetScript("OnShow", function()
+        metricCheck:SetChecked(MyFeetHurtSettings.useKm and true or false)
+        notifyCheck:SetChecked(MyFeetHurtSettings.achievementNotifications ~= false)
+        alphaSlider:SetValue(MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha)
+    end)
+
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(options, options.name)
+        Settings.RegisterAddOnCategory(category)
+    elseif InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(options)
+    end
+end
+
+-- ============================================================
 -- Event handling
 -- ============================================================
 
@@ -593,6 +664,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         InitializeSavedVariables()
         ReconcileStats()
         CreateMyFeetHurtUI()
+        CreateOptionsPanel()
         self:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_ENTERING_WORLD" then
         CheckAllMilestones()
@@ -780,11 +852,7 @@ SlashCmdList["MYFEETHURT"] = function(msg)
 
     local command = strlower(strtrim(msg or ""))
     if command == "reset" then
-        for key, value in pairs(DEFAULT_DB) do
-            MyFeetHurtDB[key] = value
-        end
-        RecalculateGlobalValues()
-        print("|cFFFF0000[MyFeetHurt] All stats and milestones have been reset to 0!|r")
+        ResetAllStats()
         return
     end
 
