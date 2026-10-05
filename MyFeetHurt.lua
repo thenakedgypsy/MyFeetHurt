@@ -203,14 +203,14 @@ local ROW_PARENT = {
 local COLLAPSIBLE = { [2] = true, [7] = true, [10] = true, [11] = true, [15] = true, [16] = true }
 
 -- Formats a distance given in miles according to the current unit setting.
--- Miles: "x.xx Miles". km mode: meters below 1 km, then "x.xx km".
+-- Miles: "x.xx Miles". Km mode: meters below 1 km, then "x.xx Km".
 local function FormatDistance(miles)
     if MyFeetHurtSettings and MyFeetHurtSettings.useKm then
         local km = miles * MILES_TO_KM
         if km < 1 then
             return string.format("%.0f m", km * 1000)
         end
-        return string.format("%.2f km", km)
+        return string.format("%.2f Km", km)
     end
     return string.format("%.2f Miles", miles)
 end
@@ -289,7 +289,7 @@ end
 
 local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, continuousMethod)
     local useKm = MyFeetHurtSettings and MyFeetHurtSettings.useKm
-    local unitName = useKm and "km" or "Miles"
+    local unitName = useKm and "Km" or "Miles"
     local factor = useKm and MILES_TO_KM or 1
     local currentVal = baseMiles * factor
     local notify = not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false
@@ -802,7 +802,7 @@ local function CreateOptionsPanel()
         return cb
     end
 
-    local metricCheck = CreateCheckbox("Use metric units (km)", header, -12)
+    local metricCheck = CreateCheckbox("Use metric units (Km)", header, -12)
     metricCheck:SetScript("OnClick", function(self)
         SetUseKm(self:GetChecked() and true or false)
     end)
@@ -1089,6 +1089,33 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                         end
                         CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
                     end
+                end
+
+                local totalBaseMiles = (MyFeetHurtDB.milesWalked or 0) + (MyFeetHurtDB.milesRidden or 0) + (MyFeetHurtDB.milesFlown or 0) + (MyFeetHurtDB.milesBoats or 0) + (MyFeetHurtDB.milesSwum or 0) + (MyFeetHurtDB.milesAirborne or 0)
+                CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
+
+                uiDirty = true
+            end
+        elseif not currentY and not UnitIsDeadOrGhost("player") then
+            -- Fallback for alive walking, swimming, and riding in instances (where UnitPosition returns nil)
+            if isWalking then
+                local distanceMiles = (legSpeed * lastUpdate) * YARDS_TO_MILES
+                if isSwimming then
+                    MyFeetHurtDB.milesSwum = (MyFeetHurtDB.milesSwum or 0) + distanceMiles
+                    if IsMounted() then
+                        MyFeetHurtDB.milesSwumMounted = (MyFeetHurtDB.milesSwumMounted or 0) + distanceMiles
+                    else
+                        MyFeetHurtDB.milesSwumUnmounted = (MyFeetHurtDB.milesSwumUnmounted or 0) + distanceMiles
+                        MyFeetHurtDB.milesSwumUnmountedAlive = (MyFeetHurtDB.milesSwumUnmountedAlive or 0) + distanceMiles
+                    end
+                    CheckAndNotifyMilestones("swumMilestone", MyFeetHurtDB.milesSwum, "swum", "swimming")
+                elseif IsMounted() then
+                    MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + distanceMiles
+                    CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+                else
+                    MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + distanceMiles
+                    MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                    CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
                 end
 
                 local totalBaseMiles = (MyFeetHurtDB.milesWalked or 0) + (MyFeetHurtDB.milesRidden or 0) + (MyFeetHurtDB.milesFlown or 0) + (MyFeetHurtDB.milesBoats or 0) + (MyFeetHurtDB.milesSwum or 0) + (MyFeetHurtDB.milesAirborne or 0)
