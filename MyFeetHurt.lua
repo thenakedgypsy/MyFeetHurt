@@ -188,8 +188,6 @@ local titleText -- Reference to window title
 local windowDecor = {} -- Decorative textures that are only visible when Simple Window Mode is off
 
 -- Collapse/expand support
--- ROW_PARENT: row index -> index of the row that controls its visibility
--- COLLAPSIBLE: row indexes that act as clickable headers
 local collapsedRows = {}
 local layoutDirty = true  -- Row layout/window height only needs redoing when this is set
 local lastRowText = {}   -- Last text applied to each row, to skip redundant SetText calls
@@ -203,7 +201,6 @@ local ROW_PARENT = {
 local COLLAPSIBLE = { [2] = true, [7] = true, [10] = true, [11] = true, [15] = true, [16] = true }
 
 -- Formats a distance given in miles according to the current unit setting.
--- Miles: "x.xx Miles". Km mode: meters below 1 km, then "x.xx Km".
 local function FormatDistance(miles)
     if MyFeetHurtSettings and MyFeetHurtSettings.useKm then
         local km = miles * MILES_TO_KM
@@ -236,8 +233,6 @@ for child, parent in pairs(ROW_PARENT) do
     table.insert(ROW_CHILDREN[parent], child)
 end
 
--- True if at least one subtype row under this row is enabled in the settings
--- (ignores collapsing). Used to decide whether the [+]/[-] toggle is shown.
 local function HasVisibleChildren(i)
     local children = ROW_CHILDREN[i]
     if not children then return false end
@@ -324,16 +319,16 @@ local function CheckAllMilestones()
     CheckAndNotifyMilestones("walkedMilestone", db.milesWalked or 0, "walked", "walking")
     CheckAndNotifyMilestones("riddenMilestone", db.milesRidden or 0, "ridden", "riding")
     CheckAndNotifyMilestones("flownMilestone", db.milesFlown or 0, "flown", "flying")
-    CheckAndNotifyMilestones("boatsMilestone", db.milesBoats or 0, "used public transportation", "traveling via public transport")
+    CheckAndNotifyMilestones("boatsMilestone", db.milesBoats or 0, "used public transportation for", "traveling via public transport")
     CheckAndNotifyMilestones("swumMilestone", db.milesSwum or 0, "swum", "swimming")
-    CheckAndNotifyMilestones("airborneMilestone", db.milesAirborne or 0, "been airborne", "jumping and falling")
+    CheckAndNotifyMilestones("airborneMilestone", db.milesAirborne or 0, "been airborne for", "jumping and falling")
 
     local totalBaseMiles = (db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesBoats or 0) + (db.milesSwum or 0) + (db.milesAirborne or 0)
     CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
 end
 
 -- ============================================================
--- Window styling (fancy by default, original look in Simple Window Mode)
+-- Window styling
 -- ============================================================
 
 local SIMPLE_BACKDROP = {
@@ -359,7 +354,7 @@ local function ApplyWindowStyle()
 
     local alpha = MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha
 
-    layoutDirty = true -- Row spacing differs between fancy and simple mode
+    layoutDirty = true
 
     if MyFeetHurtSettings.simpleWindow then
         panel:SetBackdrop(SIMPLE_BACKDROP)
@@ -532,7 +527,6 @@ local function CreateMyFeetHurtUI()
     panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
     panel:Hide()
 
-    -- Header bar and divider behind the title (colors/visibility set in ApplyWindowStyle)
     local headerBar = panel:CreateTexture(nil, "BORDER")
     headerBar:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -4)
     headerBar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -4, -4)
@@ -595,7 +589,6 @@ local function CreateMyFeetHurtUI()
         end
     end
 
-    -- Divider above the "Total Distance Travelled" rows
     local totalsLine = panel:CreateTexture(nil, "BORDER")
     totalsLine:SetPoint("BOTTOM", statTexts[20], "TOP", 0, CONFIG.FANCY_TOTALS_EXTRA / 2 + 1)
     totalsLine:SetSize(200, 1)
@@ -764,7 +757,6 @@ local function SetUseKm(useKm)
     if (MyFeetHurtSettings.useKm and true or false) == useKm then return end
     MyFeetHurtSettings.useKm = useKm
 
-    -- Milestones are stored in the display unit, so convert them along with the switch
     local ratio = useKm and MILES_TO_KM or (1 / MILES_TO_KM)
     for _, key in ipairs({"walkedMilestone", "riddenMilestone", "flownMilestone", "boatsMilestone", "swumMilestone", "airborneMilestone", "travelledMilestone"}) do
         if MyFeetHurtDB[key] and MyFeetHurtDB[key] > 0 then
@@ -841,8 +833,6 @@ local function CreateOptionsPanel()
     resetButton:SetText("Reset Lifetime Stats")
     resetButton:SetScript("OnClick", ResetAllStats)
 
-    -- Display section: choose which types (left) and subtypes (right) are shown,
-    -- separately for the window and the tooltip
     local displayHeader = options:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     displayHeader:SetPoint("TOPLEFT", resetButton, "BOTTOMLEFT", 4, -20)
     displayHeader:SetText("Show in window and tooltip")
@@ -940,8 +930,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
         CreateOptionsPanel()
         self:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_ENTERING_WORLD" then
+        lastY, lastX, lastZ = nil, nil, nil
         CheckAllMilestones()
-        RecalculateGlobalValues()
+        RecalculateGlobalValues()       
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     end
 end)
@@ -957,6 +948,15 @@ local boatCandidateTime = 0  -- How long the speed mismatch has been sustained
 local uiElapsed = 0          -- Time since the window was last refreshed
 local uiDirty = false          -- Set when stats changed since the last window refresh
 
+-- Safe getter for unit movement speed that avoids arithmetic on secret values
+local function GetSafeUnitSpeed()
+    local success, speed = pcall(GetUnitSpeed, "player")
+    if success and type(speed) == "number" then
+        return speed
+    end
+    return nil
+end
+
 distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     lastUpdate = lastUpdate + elapsed
     if lastUpdate < updateInterval then return end
@@ -966,8 +966,9 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     end
 
     if not InCombatLockdown() then
-        local legSpeed = GetUnitSpeed("player") or 0
-        local isWalking = legSpeed > 0
+        local legSpeed = GetSafeUnitSpeed()
+        -- Use the native speed check rather than the undefined IsMoving()
+        local isWalking = legSpeed and legSpeed > 0
         
         local isOnTaxi = UnitOnTaxi("player")
         
@@ -982,6 +983,12 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
 
         local currentY, currentX, currentZ = UnitPosition("player")
 
+        -- Hoist airborne check so the dungeon fallback can access it
+        local isAirborneNow = false
+        if not isFlying and not isSwimming and not isOnTaxi then
+            isAirborneNow = isFallingNative
+        end
+
         if currentY and currentX and currentZ and lastY and lastX and lastZ then
             local dy = currentY - lastY
             local dx = currentX - lastX
@@ -992,25 +999,24 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                 local distanceMiles = distanceYards * YARDS_TO_MILES
                 local actualSpeed = distanceYards / lastUpdate
                 
-                local isAirborneNow = false
-                if not isFlying and not isSwimming and not isOnTaxi then
-                    isAirborneNow = isFallingNative
-                end
-
-                local speedDiff = math.abs(actualSpeed - legSpeed)
-                if isSwimming or isFlying or isOnTaxi or isAirborneNow then
-                    isOnBoatState = false
-                    boatCandidateTime = 0
-                elseif speedDiff > 4.0 then
-                    boatCandidateTime = boatCandidateTime + lastUpdate
-                    if boatCandidateTime >= CONFIG.BOAT_ENTER_DELAY then
-                        isOnBoatState = true
+                if legSpeed then
+                    local speedDiff = math.abs(actualSpeed - legSpeed)
+                    if isSwimming or isFlying or isOnTaxi or isAirborneNow then
+                        isOnBoatState = false
+                        boatCandidateTime = 0
+                    elseif speedDiff > 4.0 then
+                        boatCandidateTime = boatCandidateTime + lastUpdate
+                        if boatCandidateTime >= CONFIG.BOAT_ENTER_DELAY then
+                            isOnBoatState = true
+                        end
+                    else
+                        boatCandidateTime = 0
+                        if speedDiff < 1.0 then
+                            isOnBoatState = false
+                        end
                     end
                 else
-                    boatCandidateTime = 0
-                    if speedDiff < 1.0 then
-                        isOnBoatState = false
-                    end
+                    isOnBoatState = false
                 end
 
                 if isOnTaxi then
@@ -1027,7 +1033,7 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                     CheckAndNotifyMilestones("boatsMilestone", MyFeetHurtDB.milesBoats, "used public transportation", "traveling via public transport")
 
                     if isWalking then
-                        local legDistanceMiles = (legSpeed * lastUpdate) * YARDS_TO_MILES
+                        local legDistanceMiles = (legSpeed and (legSpeed * lastUpdate) or distanceYards) * YARDS_TO_MILES
                         
                         if IsMounted() then
                             MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + legDistanceMiles
@@ -1096,25 +1102,56 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
 
                 uiDirty = true
             end
-        elseif not currentY and not UnitIsDeadOrGhost("player") then
-            -- Fallback for alive walking, swimming, and riding in instances (where UnitPosition returns nil)
-            if isWalking then
-                local distanceMiles = (legSpeed * lastUpdate) * YARDS_TO_MILES
+
+        elseif not currentY then
+            -- DUNGEON FALLBACK: Coordinate tracking is disabled inside instances. 
+            -- Calculate synthetic distance using elapsed time and moving speed.
+            local isMoving = (legSpeed and legSpeed > 0) or isAirborneNow
+            
+            if isMoving then
+                -- Base walk speed is 7.0 yds/sec. If legSpeed reads a value, use it.
+                local fallbackSpeed = (legSpeed and legSpeed > 0) and legSpeed or 7.0
+                local distanceMiles = (fallbackSpeed * lastUpdate) * YARDS_TO_MILES
+                
                 if isSwimming then
                     MyFeetHurtDB.milesSwum = (MyFeetHurtDB.milesSwum or 0) + distanceMiles
                     if IsMounted() then
                         MyFeetHurtDB.milesSwumMounted = (MyFeetHurtDB.milesSwumMounted or 0) + distanceMiles
                     else
                         MyFeetHurtDB.milesSwumUnmounted = (MyFeetHurtDB.milesSwumUnmounted or 0) + distanceMiles
-                        MyFeetHurtDB.milesSwumUnmountedAlive = (MyFeetHurtDB.milesSwumUnmountedAlive or 0) + distanceMiles
+                        if UnitIsDeadOrGhost("player") then
+                            MyFeetHurtDB.milesSwumUnmountedDead = (MyFeetHurtDB.milesSwumUnmountedDead or 0) + distanceMiles
+                        else
+                            MyFeetHurtDB.milesSwumUnmountedAlive = (MyFeetHurtDB.milesSwumUnmountedAlive or 0) + distanceMiles
+                        end
                     end
                     CheckAndNotifyMilestones("swumMilestone", MyFeetHurtDB.milesSwum, "swum", "swimming")
+                
+                elseif isAirborneNow then
+                    MyFeetHurtDB.milesAirborne = (MyFeetHurtDB.milesAirborne or 0) + distanceMiles
+                    if UnitIsDeadOrGhost("player") then
+                        MyFeetHurtDB.milesAirborneDead = (MyFeetHurtDB.milesAirborneDead or 0) + distanceMiles
+                    else
+                        MyFeetHurtDB.milesAirborneAlive = (MyFeetHurtDB.milesAirborneAlive or 0) + distanceMiles
+                    end
+                    if IsMounted() then
+                        MyFeetHurtDB.milesAirborneMounted = (MyFeetHurtDB.milesAirborneMounted or 0) + distanceMiles
+                    else
+                        MyFeetHurtDB.milesAirborneUnmounted = (MyFeetHurtDB.milesAirborneUnmounted or 0) + distanceMiles
+                    end
+                    CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
+                
                 elseif IsMounted() then
                     MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + distanceMiles
                     CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+                
                 else
                     MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + distanceMiles
-                    MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                    if UnitIsDeadOrGhost("player") then
+                        MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + distanceMiles
+                    else
+                        MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                    end
                     CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
                 end
 
@@ -1125,7 +1162,6 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
             end
         end
 
-        -- Refresh the window at a fixed rate; also covers the last update after you stop moving
         if uiDirty then
             uiElapsed = uiElapsed + lastUpdate
             if uiElapsed >= CONFIG.UI_REFRESH_INTERVAL then
