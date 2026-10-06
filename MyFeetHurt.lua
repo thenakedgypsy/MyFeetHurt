@@ -1,7 +1,7 @@
 local ADDON_NAME = "MyFeetHurt"
 
 -- ============================================================
--- ADDON CONFIGURATION & CONSTANTS (Fiddle with these freely!)
+-- ADDON CONFIGURATION & CONSTANTS
 -- ============================================================
 local CONFIG = {
     -- Window dimensions & layout
@@ -60,6 +60,8 @@ local DEFAULT_DB = {
     swumMilestone = 0,
     airborneMilestone = 0,
     travelledMilestone = 0,
+    jumps = 0,
+    jumpsMilestone = 0,
 }
 
 local DEFAULT_SETTINGS = {
@@ -85,6 +87,7 @@ local DEFAULT_SETTINGS = {
     tipAirUnmounted = true,
     tipAirUnmountedSub = true,
     tipAirMounted = true,
+    tipJumps = false,
 
     showWalking = true,
     showWalkingSub = true,            -- Walking: Alive / Dead
@@ -100,6 +103,17 @@ local DEFAULT_SETTINGS = {
     showAirUnmounted = true,
     showAirUnmountedSub = true,       -- Airborne Unmounted: Alive / Dead
     showAirMounted = true,
+    showJumps = false,                -- Jump counter (off by default)
+
+    -- Per-stat milestone notifications (the master "achievementNotifications" setting must also be on)
+    notifyWalked = true,
+    notifyRidden = true,
+    notifyFlown = true,
+    notifyBoats = true,
+    notifySwum = true,
+    notifyAirborne = true,
+    notifyTravelled = true,
+    notifyJumps = false,              -- Off by default
 }
 
 local function InitializeSavedVariables()
@@ -228,6 +242,7 @@ local ROW_SETTING = {
     [7] = "showTransport", [8] = "showTransportSub", [9] = "showTransportSub",
     [10] = "showSwimming", [11] = "showSwimUnmounted", [12] = "showSwimUnmountedSub", [13] = "showSwimUnmountedSub", [14] = "showSwimMounted",
     [15] = "showAirborne", [16] = "showAirUnmounted", [17] = "showAirUnmountedSub", [18] = "showAirUnmountedSub", [19] = "showAirMounted",
+    [20] = "showJumps",
 }
 
 local function IsSettingEnabled(key)
@@ -285,17 +300,31 @@ local function GetNextMilestone(m)
     elseif m < 5 then return 5
     elseif m < 10 then return 10
     elseif m < 20 then return 20
+    elseif m < 30 then return 30
+    elseif m < 40 then return 40
     elseif m < 50 then return 50
     elseif m < 100 then return 100
     else return m + 100 end
 end
+
+-- milestone key -> setting that toggles its notifications
+local MILESTONE_NOTIFY_SETTING = {
+    walkedMilestone = "notifyWalked",
+    riddenMilestone = "notifyRidden",
+    flownMilestone = "notifyFlown",
+    boatsMilestone = "notifyBoats",
+    swumMilestone = "notifySwum",
+    airborneMilestone = "notifyAirborne",
+    travelledMilestone = "notifyTravelled",
+}
 
 local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, continuousMethod)
     local useKm = MyFeetHurtSettings and MyFeetHurtSettings.useKm
     local unitName = useKm and "Km" or "Miles"
     local factor = useKm and MILES_TO_KM or 1
     local currentVal = baseMiles * factor
-    local notify = not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false
+    local notify = (not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false)
+        and IsSettingEnabled(MILESTONE_NOTIFY_SETTING[milestoneKey])
 
     local lastM = MyFeetHurtDB[milestoneKey] or 0
     local nextM = GetNextMilestone(lastM)
@@ -333,6 +362,46 @@ local function CheckAllMilestones()
 
     local totalBaseMiles = (db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesBoats or 0) + (db.milesSwum or 0) + (db.milesAirborne or 0)
     CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
+end
+
+-- Jump milestones: 10, 20, 30, 40, 50, 100, then every 100. Jumps are a plain count, so no unit conversion.
+local function GetNextJumpMilestone(m)
+    if m < 10 then return 10
+    elseif m < 20 then return 20
+    elseif m < 30 then return 30
+    elseif m < 40 then return 40
+    elseif m < 50 then return 50
+    elseif m < 100 then return 100
+    else return m + 100 end
+end
+
+local function CheckJumpMilestones()
+    local notify = (not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false)
+        and IsSettingEnabled("notifyJumps")
+    local jumps = MyFeetHurtDB.jumps or 0
+    local lastM = MyFeetHurtDB.jumpsMilestone or 0
+    local nextM = GetNextJumpMilestone(lastM)
+
+    while jumps >= nextM do
+        if notify then
+            local faction = UnitFactionGroup("player")
+            local factionHex = (faction == "Horde") and CONFIG.COLOR_HORDE or CONFIG.COLOR_ALLIANCE
+            local msg = string.format("My Feet Hurt: Congratulations!! You've jumped %d times! - Keep on jumping!!", nextM)
+            local coloredMsg = string.format("|c%s%s|r", factionHex, msg)
+
+            print(coloredMsg)
+
+            if RaidNotice_AddMessage and RaidWarningFrame then
+                RaidNotice_AddMessage(RaidWarningFrame, coloredMsg, ChatTypeInfo["RAID_WARNING"])
+            end
+
+            PlaySound(5274, "Master")
+        end
+
+        MyFeetHurtDB.jumpsMilestone = nextM
+        lastM = nextM
+        nextM = GetNextJumpMilestone(lastM)
+    end
 end
 
 -- ============================================================
@@ -436,6 +505,7 @@ local function RecalculateGlobalValues()
         string.format("|c%sAlive: %s|r", CONFIG.COLOR_AIRBORNE_SUB, FormatDistance(db.milesAirborneAlive or 0)),
         string.format("|c%sDead: %s|r", CONFIG.COLOR_AIRBORNE_SUB, FormatDistance(db.milesAirborneDead or 0)),
         string.format("|c%sMounted: %s|r", CONFIG.COLOR_SUBTOTALS, FormatDistance(db.milesAirborneMounted or 0)),
+        string.format("|c%sJumps: %s|r", CONFIG.COLOR_TOTALS, AddThousandsSeparators(string.format("%d", db.jumps or 0))),
         factionHex .. "Total Distance Travelled:|r",
         factionHex .. FormatDistance(travelledTotal) .. "|r",
     }
@@ -471,7 +541,7 @@ local function RecalculateGlobalValues()
                 if IsRowVisible(i) then
                     fs:ClearAllPoints()
                     if previousRow then
-                        local extra = (i == 20) and totalsExtra or 0
+                        local extra = (i == 21) and totalsExtra or 0
                         fs:SetPoint("TOP", previousRow, "BOTTOM", 0, CONFIG.ROW_SPACING - extra)
                         extraHeight = extraHeight + extra
                     else
@@ -563,17 +633,17 @@ local function CreateMyFeetHurtUI()
     titleText:SetPoint("TOP", panel, "TOP", 0, -8)
     titleText:SetText("My Feet Hurt")
 
-    for i = 1, 21 do
+    for i = 1, 22 do
         local fontObj = "GameFontNormal"
-        if i == 1 or i == 20 or i == 21 then
+        if i == 1 or i == 21 or i == 22 then
             fontObj = "GameFontHighlightLarge"
-        elseif i == 2 or i == 5 or i == 6 or i == 7 or i == 10 or i == 15 then
+        elseif i == 2 or i == 5 or i == 6 or i == 7 or i == 10 or i == 15 or i == 20 then
             fontObj = "GameFontNormalLarge"
         end
 
         local fs = panel:CreateFontString(nil, "ARTWORK", fontObj)
         fs:SetJustifyH("CENTER")
-        if i == 21 then
+        if i == 22 then
             local fontPath, fontSize, fontFlags = fs:GetFont()
             fs:SetFont(fontPath, fontSize + 4, fontFlags)
         end
@@ -598,7 +668,7 @@ local function CreateMyFeetHurtUI()
     end
 
     local totalsLine = panel:CreateTexture(nil, "BORDER")
-    totalsLine:SetPoint("BOTTOM", statTexts[20], "TOP", 0, CONFIG.FANCY_TOTALS_EXTRA / 2 + 1)
+    totalsLine:SetPoint("BOTTOM", statTexts[21], "TOP", 0, CONFIG.FANCY_TOTALS_EXTRA / 2 + 1)
     totalsLine:SetSize(200, 1)
     windowDecor.totalsLine = totalsLine
 
@@ -745,6 +815,9 @@ local function CreateMyFeetHurtUI()
                 GameTooltip:AddDoubleLine("   Mounted:", FormatDistance(airborneMnt), 0.9, 0.7, 0, 0.9, 0.7, 0)
             end
         end
+        if IsSettingEnabled("tipJumps") then
+            GameTooltip:AddDoubleLine("Jumps:", AddThousandsSeparators(string.format("%d", db.jumps or 0)), 1, 1, 1, 1, 1, 1)
+        end
         GameTooltip:AddLine(" ")
         GameTooltip:AddDoubleLine("Total Distance Travelled:", FormatDistance(travelled), fr, fg, fb, fr, fg, fb)
         GameTooltip:AddLine(" ")
@@ -787,12 +860,23 @@ local function CreateOptionsPanel()
     local options = CreateFrame("Frame")
     options.name = "My Feet Hurt"
 
-    local header = options:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    -- Scrollable content area: all option widgets are parented to `content`
+    local scroll = CreateFrame("ScrollFrame", nil, options, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", options, "TOPLEFT", 0, -4)
+    scroll:SetPoint("BOTTOMRIGHT", options, "BOTTOMRIGHT", -28, 4)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(600, 740)
+    scroll:SetScrollChild(content)
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        if width and width > 0 then content:SetWidth(width) end
+    end)
+
+    local header = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     header:SetPoint("TOPLEFT", 16, -16)
     header:SetText("My Feet Hurt")
 
     local function CreateCheckbox(label, anchor, yOffset, xOffset)
-        local cb = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
+        local cb = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
         cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", xOffset or 0, yOffset)
         if label then
             local text = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -812,14 +896,41 @@ local function CreateOptionsPanel()
         MyFeetHurtSettings.achievementNotifications = self:GetChecked() and true or false
     end)
 
-    local simpleCheck = CreateCheckbox("Simple window mode", notifyCheck, -4)
+    -- Per-stat milestone notification checkboxes (two columns, indented under the master checkbox)
+    local notifyChecks = {}
+    local function CreateNotifyCheck(key, label, anchor, xOffset, yOffset)
+        local cb = CreateCheckbox(label, anchor, yOffset, xOffset)
+        cb:SetScript("OnClick", function(self)
+            MyFeetHurtSettings[key] = self:GetChecked() and true or false
+        end)
+        notifyChecks[key] = cb
+        return cb
+    end
+
+    local nWalk = CreateNotifyCheck("notifyWalked", "Walking", notifyCheck, 24, -2)
+    local nRide = CreateNotifyCheck("notifyRidden", "Riding", nWalk, 0, -2)
+    local nFlight = CreateNotifyCheck("notifyFlown", "Flight Path", nRide, 0, -2)
+    local nTotal = CreateNotifyCheck("notifyTravelled", "Total Distance Travelled", nFlight, 0, -2)
+
+    local function CreateRightNotifyCheck(key, label, leftCheck)
+        local cb = CreateNotifyCheck(key, label, leftCheck, 0, 0)
+        cb:ClearAllPoints()
+        cb:SetPoint("LEFT", leftCheck, "LEFT", 230, 0)
+        return cb
+    end
+    CreateRightNotifyCheck("notifyBoats", "Public Transport", nWalk)
+    CreateRightNotifyCheck("notifySwum", "Swimming", nRide)
+    CreateRightNotifyCheck("notifyAirborne", "Airborne", nFlight)
+    CreateRightNotifyCheck("notifyJumps", "Jumps", nTotal)
+
+    local simpleCheck = CreateCheckbox("Simple window mode", nTotal, -4, -24)
     simpleCheck:SetScript("OnClick", function(self)
         MyFeetHurtSettings.simpleWindow = self:GetChecked() and true or false
         ApplyWindowStyle()
         RecalculateGlobalValues()
     end)
 
-    local alphaSlider = CreateFrame("Slider", "MyFeetHurtAlphaSlider", options, "OptionsSliderTemplate")
+    local alphaSlider = CreateFrame("Slider", "MyFeetHurtAlphaSlider", content, "OptionsSliderTemplate")
     alphaSlider:SetPoint("TOPLEFT", simpleCheck, "BOTTOMLEFT", 8, -28)
     alphaSlider:SetWidth(220)
     alphaSlider:SetMinMaxValues(0, 1)
@@ -835,13 +946,13 @@ local function CreateOptionsPanel()
         ApplyWindowStyle()
     end)
 
-    local resetButton = CreateFrame("Button", nil, options, "UIPanelButtonTemplate")
+    local resetButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     resetButton:SetSize(160, 22)
     resetButton:SetPoint("TOPLEFT", alphaSlider, "BOTTOMLEFT", -4, -24)
     resetButton:SetText("Reset Lifetime Stats")
     resetButton:SetScript("OnClick", ResetAllStats)
 
-    local displayHeader = options:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    local displayHeader = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     displayHeader:SetPoint("TOPLEFT", resetButton, "BOTTOMLEFT", 4, -20)
     displayHeader:SetText("Show in window and tooltip")
 
@@ -865,15 +976,15 @@ local function CreateOptionsPanel()
                 MyFeetHurtSettings[tipKey] = self:GetChecked() and true or false
             end)
 
-            local text = options:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+            local text = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
             text:SetPoint("LEFT", tipCheck, "RIGHT", 4, 0)
             text:SetText(label)
 
             if isFirst then
-                local windowLabel = options:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                local windowLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
                 windowLabel:SetPoint("BOTTOM", windowCheck, "TOP", 0, -4)
                 windowLabel:SetText("Window")
-                local tipLabel = options:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                local tipLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
                 tipLabel:SetPoint("BOTTOM", tipCheck, "TOP", 0, -4)
                 tipLabel:SetText("Tooltip")
                 isFirst = false
@@ -892,6 +1003,7 @@ local function CreateOptionsPanel()
         { "showTransport", "tipTransport", "Public Transport" },
         { "showSwimming", "tipSwimming", "Swimming" },
         { "showAirborne", "tipAirborne", "Airborne" },
+        { "showJumps", "tipJumps", "Jump Counter" },
     }, 0)
 
     CreateDisplayColumn({
@@ -911,6 +1023,9 @@ local function CreateOptionsPanel()
         end
         metricCheck:SetChecked(MyFeetHurtSettings.useKm and true or false)
         notifyCheck:SetChecked(MyFeetHurtSettings.achievementNotifications ~= false)
+        for key, cb in pairs(notifyChecks) do
+            cb:SetChecked(MyFeetHurtSettings[key] ~= false)
+        end
         simpleCheck:SetChecked(MyFeetHurtSettings.simpleWindow and true or false)
         alphaSlider:SetValue(MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha)
     end)
@@ -956,14 +1071,37 @@ local boatCandidateTime = 0  -- How long the speed mismatch has been sustained
 local uiElapsed = 0          -- Time since the window was last refreshed
 local uiDirty = false          -- Set when stats changed since the last window refresh
 
--- Safe getter for unit movement speed that avoids arithmetic on secret values
+-- Returns true if the value is a "secret" value (restricted during encounters), which errors on comparison/arithmetic
+local function IsSecret(value)
+    return issecretvalue ~= nil and issecretvalue(value) and true or false
+end
+
+-- Safe getter for unit movement speed that avoids arithmetic on secret values.
+-- Second return value is true when the speed was secret (restricted) and cannot be used this tick.
 local function GetSafeUnitSpeed()
     local success, speed = pcall(GetUnitSpeed, "player")
-    if success and type(speed) == "number" then
-        return speed
+    if success then
+        if IsSecret(speed) then
+            return nil, true
+        end
+        if type(speed) == "number" then
+            return speed
+        end
     end
     return nil
 end
+
+-- Jump counter: counts a jump only when the jump key is pressed on the ground (not while
+-- falling, swimming, flying, on a taxi, or in combat). Only counts while enabled.
+hooksecurefunc("JumpOrAscendStart", function()
+    if not MyFeetHurtDB or not MyFeetHurtSettings then return end
+    if not (MyFeetHurtSettings.showJumps or MyFeetHurtSettings.tipJumps) then return end
+    if InCombatLockdown() then return end
+    if IsFalling() or IsSwimming() or IsFlying() or UnitOnTaxi("player") then return end
+    MyFeetHurtDB.jumps = (MyFeetHurtDB.jumps or 0) + 1
+    CheckJumpMilestones()
+    uiDirty = true
+end)
 
 distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     lastUpdate = lastUpdate + elapsed
@@ -974,7 +1112,13 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     end
 
     if not InCombatLockdown() then
-        local legSpeed = GetSafeUnitSpeed()
+        local legSpeed, speedSecret = GetSafeUnitSpeed()
+        if speedSecret then
+            -- Encounter restrictions can start before InCombatLockdown() reports true; skip this tick
+            lastY, lastX, lastZ = nil, nil, nil
+            lastUpdate = 0
+            return
+        end
         -- Use the native speed check rather than the undefined IsMoving()
         local isWalking = legSpeed and legSpeed > 0
         
@@ -990,6 +1134,11 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
         if type(IsFalling) == "function" then isFallingNative = IsFalling() end
 
         local currentY, currentX, currentZ = UnitPosition("player")
+        if IsSecret(currentY) or IsSecret(currentX) or IsSecret(currentZ) then
+            lastY, lastX, lastZ = nil, nil, nil
+            lastUpdate = 0
+            return
+        end
 
         -- Hoist airborne check so the dungeon fallback can access it
         local isAirborneNow = false
