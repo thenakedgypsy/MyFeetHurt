@@ -215,7 +215,7 @@ local function FormatDistance(miles)
         if km < 1 then
             return string.format("%.0f m", km * 1000)
         end
-        return AddThousandsSeparators(string.format("%.2f", km)) .. " Km"
+        return AddThousandsSeparators(string.format("%.2f", km)) .. " km"
     end
     return AddThousandsSeparators(string.format("%.2f", miles)) .. " Miles"
 end
