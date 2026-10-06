@@ -200,6 +200,14 @@ local ROW_PARENT = {
 }
 local COLLAPSIBLE = { [2] = true, [7] = true, [10] = true, [11] = true, [15] = true, [16] = true }
 
+-- Inserts thousands separators into a formatted number string (e.g. "15424145.00" -> "15,424,145.00").
+local function AddThousandsSeparators(numStr)
+    local whole, rest = numStr:match("^(%d+)(.*)$")
+    if not whole then return numStr end
+    whole = whole:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    return whole .. rest
+end
+
 -- Formats a distance given in miles according to the current unit setting.
 local function FormatDistance(miles)
     if MyFeetHurtSettings and MyFeetHurtSettings.useKm then
@@ -207,9 +215,9 @@ local function FormatDistance(miles)
         if km < 1 then
             return string.format("%.0f m", km * 1000)
         end
-        return string.format("%.2f Km", km)
+        return AddThousandsSeparators(string.format("%.2f", km)) .. " Km"
     end
-    return string.format("%.2f Miles", miles)
+    return AddThousandsSeparators(string.format("%.2f", miles)) .. " Miles"
 end
 
 -- ROW_SETTING: row index -> setting that toggles whether the row is displayed
