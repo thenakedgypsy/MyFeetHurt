@@ -1158,9 +1158,11 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                 
                 if legSpeed then
                     local speedDiff = math.abs(actualSpeed - legSpeed)
-                    if isSwimming or isFlying or isOnTaxi or isAirborneNow then
+                    if isSwimming or isFlying or isOnTaxi then
                         isOnBoatState = false
                         boatCandidateTime = 0
+                    elseif isAirborneNow then
+                        -- Jumping on public transport: leave the boat state untouched
                     elseif speedDiff > 4.0 then
                         boatCandidateTime = boatCandidateTime + lastUpdate
                         if boatCandidateTime >= CONFIG.BOAT_ENTER_DELAY then
@@ -1189,7 +1191,22 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                     end
                     CheckAndNotifyMilestones("boatsMilestone", MyFeetHurtDB.milesBoats, "used public transportation", "traveling via public transport")
 
-                    if isWalking then
+                    if isAirborneNow then
+                        -- Jumping on public transport: count the jump as Airborne alongside the boat distance
+                        local airDistanceMiles = ((legSpeed and legSpeed > 0) and legSpeed or 7.0) * lastUpdate * YARDS_TO_MILES
+                        MyFeetHurtDB.milesAirborne = (MyFeetHurtDB.milesAirborne or 0) + airDistanceMiles
+                        if UnitIsDeadOrGhost("player") then
+                            MyFeetHurtDB.milesAirborneDead = (MyFeetHurtDB.milesAirborneDead or 0) + airDistanceMiles
+                        else
+                            MyFeetHurtDB.milesAirborneAlive = (MyFeetHurtDB.milesAirborneAlive or 0) + airDistanceMiles
+                        end
+                        if IsMounted() then
+                            MyFeetHurtDB.milesAirborneMounted = (MyFeetHurtDB.milesAirborneMounted or 0) + airDistanceMiles
+                        else
+                            MyFeetHurtDB.milesAirborneUnmounted = (MyFeetHurtDB.milesAirborneUnmounted or 0) + airDistanceMiles
+                        end
+                        CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
+                    elseif isWalking then
                         local legDistanceMiles = (legSpeed and (legSpeed * lastUpdate) or distanceYards) * YARDS_TO_MILES
                         
                         if IsMounted() then
