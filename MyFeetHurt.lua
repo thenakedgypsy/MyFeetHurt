@@ -1068,6 +1068,7 @@ local lastUpdate = 0
 local updateInterval = 0.04  -- High-precision tick rate (~25 updates per second)
 local isOnBoatState = false  -- State machine for boat/zeppelin tracking
 local boatCandidateTime = 0  -- How long the speed mismatch has been sustained
+local boatSpeedEstimate = nil -- Smoothed transport speed (yds/sec), sampled while standing still on it
 local uiElapsed = 0          -- Time since the window was last refreshed
 local uiDirty = false          -- Set when stats changed since the last window refresh
 
@@ -1178,16 +1179,31 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                     isOnBoatState = false
                 end
 
+                if not isOnBoatState then
+                    boatSpeedEstimate = nil
+                end
+
                 if isOnTaxi then
                     MyFeetHurtDB.milesFlown = (MyFeetHurtDB.milesFlown or 0) + distanceMiles
                     CheckAndNotifyMilestones("flownMilestone", MyFeetHurtDB.milesFlown, "flown", "flying")
                 
                 elseif isOnBoatState then
-                    MyFeetHurtDB.milesBoats = (MyFeetHurtDB.milesBoats or 0) + distanceMiles
+                    -- Standing still on the transport: our displacement is purely the transport's speed, so sample it
+                    if legSpeed == 0 and not isAirborneNow then
+                        boatSpeedEstimate = boatSpeedEstimate and (boatSpeedEstimate * 0.8 + actualSpeed * 0.2) or actualSpeed
+                    end
+
+                    -- While airborne or walking/riding on it, use the sampled transport speed so our own movement isn't counted as transport distance
+                    local boatDistanceMiles = distanceMiles
+                    if (isAirborneNow or isWalking) and boatSpeedEstimate then
+                        boatDistanceMiles = boatSpeedEstimate * lastUpdate * YARDS_TO_MILES
+                    end
+
+                    MyFeetHurtDB.milesBoats = (MyFeetHurtDB.milesBoats or 0) + boatDistanceMiles
                     if UnitIsDeadOrGhost("player") then
-                        MyFeetHurtDB.milesBoatsDead = (MyFeetHurtDB.milesBoatsDead or 0) + distanceMiles
+                        MyFeetHurtDB.milesBoatsDead = (MyFeetHurtDB.milesBoatsDead or 0) + boatDistanceMiles
                     else
-                        MyFeetHurtDB.milesBoatsAlive = (MyFeetHurtDB.milesBoatsAlive or 0) + distanceMiles
+                        MyFeetHurtDB.milesBoatsAlive = (MyFeetHurtDB.milesBoatsAlive or 0) + boatDistanceMiles
                     end
                     CheckAndNotifyMilestones("boatsMilestone", MyFeetHurtDB.milesBoats, "used public transportation", "traveling via public transport")
 
