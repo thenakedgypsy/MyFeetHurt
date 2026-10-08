@@ -856,6 +856,21 @@ local function ResetAllStats()
     print("|cFFFF0000[MyFeetHurt] All stats and milestones have been reset to 0!|r")
 end
 
+StaticPopupDialogs["MYFEETHURT_CONFIRM_RESET"] = {
+    text = "Are you sure you want to reset your lifetime stats and milestones? This cannot be undone.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function()
+        ResetAllStats()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+local optionsPanel, optionsCategory
+
 local function CreateOptionsPanel()
     local options = CreateFrame("Frame")
     options.name = "My Feet Hurt"
@@ -950,7 +965,9 @@ local function CreateOptionsPanel()
     resetButton:SetSize(160, 22)
     resetButton:SetPoint("TOPLEFT", alphaSlider, "BOTTOMLEFT", -4, -24)
     resetButton:SetText("Reset Lifetime Stats")
-    resetButton:SetScript("OnClick", ResetAllStats)
+    resetButton:SetScript("OnClick", function()
+        StaticPopup_Show("MYFEETHURT_CONFIRM_RESET")
+    end)
 
     local displayHeader = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     displayHeader:SetPoint("TOPLEFT", resetButton, "BOTTOMLEFT", 4, -20)
@@ -1030,9 +1047,11 @@ local function CreateOptionsPanel()
         alphaSlider:SetValue(MyFeetHurtSettings.backgroundAlpha or DEFAULT_SETTINGS.backgroundAlpha)
     end)
 
+    optionsPanel = options
     if Settings and Settings.RegisterCanvasLayoutCategory then
         local category = Settings.RegisterCanvasLayoutCategory(options, options.name)
         Settings.RegisterAddOnCategory(category)
+        optionsCategory = category
     elseif InterfaceOptions_AddCategory then
         InterfaceOptions_AddCategory(options)
     end
@@ -1378,7 +1397,18 @@ SlashCmdList["MYFEETHURT"] = function(msg)
 
     local command = strlower(strtrim(msg or ""))
     if command == "reset" then
-        ResetAllStats()
+        StaticPopup_Show("MYFEETHURT_CONFIRM_RESET")
+        return
+    end
+
+    if command == "options" then
+        if Settings and Settings.OpenToCategory and optionsCategory then
+            Settings.OpenToCategory(optionsCategory:GetID())
+        elseif InterfaceOptionsFrame_OpenToCategory and optionsPanel then
+            -- Called twice: a known quirk where the first call can open the wrong page
+            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        end
         return
     end
 
