@@ -2,5 +2,6 @@
 ## Title: My Feet Hurt
 ## Notes: Tracks player travel miles (walked, ridden, flown, swum).
 ## SavedVariables: MyFeetHurtDB, MyFeetHurtSettings
+## SavedVariablesPerCharacter: MyFeetHurtCharDB
 
 MyFeetHurt.lua

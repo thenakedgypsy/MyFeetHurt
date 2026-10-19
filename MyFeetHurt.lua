@@ -117,22 +117,29 @@ local DEFAULT_SETTINGS = {
 }
 
 local function InitializeSavedVariables()
-    MyFeetHurtDB = MyFeetHurtDB or {}
+    -- Migration: stats used to be account-wide (MyFeetHurtDB). Hand them to the
+    -- first character that logs in, then clear the account-wide copy.
+    if MyFeetHurtCharDB == nil and type(MyFeetHurtDB) == "table" then
+        MyFeetHurtCharDB = MyFeetHurtDB
+    end
+    MyFeetHurtDB = nil
+
+    MyFeetHurtCharDB = MyFeetHurtCharDB or {}
     MyFeetHurtSettings = MyFeetHurtSettings or {}
 
     -- Backwards compatibility: Migrate old fallen stats to airborne if they exist
-    if MyFeetHurtDB.milesFallen ~= nil and MyFeetHurtDB.milesAirborne == nil then
-        MyFeetHurtDB.milesAirborne = MyFeetHurtDB.milesFallen
-        MyFeetHurtDB.milesAirborneAlive = MyFeetHurtDB.milesFallenAlive
-        MyFeetHurtDB.milesAirborneDead = MyFeetHurtDB.milesFallenDead
-        MyFeetHurtDB.milesAirborneUnmounted = MyFeetHurtDB.milesFallenUnmounted
-        MyFeetHurtDB.milesAirborneMounted = MyFeetHurtDB.milesFallenMounted
-        MyFeetHurtDB.airborneMilestone = MyFeetHurtDB.fallenMilestone or 0
+    if MyFeetHurtCharDB.milesFallen ~= nil and MyFeetHurtCharDB.milesAirborne == nil then
+        MyFeetHurtCharDB.milesAirborne = MyFeetHurtCharDB.milesFallen
+        MyFeetHurtCharDB.milesAirborneAlive = MyFeetHurtCharDB.milesFallenAlive
+        MyFeetHurtCharDB.milesAirborneDead = MyFeetHurtCharDB.milesFallenDead
+        MyFeetHurtCharDB.milesAirborneUnmounted = MyFeetHurtCharDB.milesFallenUnmounted
+        MyFeetHurtCharDB.milesAirborneMounted = MyFeetHurtCharDB.milesFallenMounted
+        MyFeetHurtCharDB.airborneMilestone = MyFeetHurtCharDB.fallenMilestone or 0
     end
 
     for key, value in pairs(DEFAULT_DB) do
-        if MyFeetHurtDB[key] == nil then
-            MyFeetHurtDB[key] = value
+        if MyFeetHurtCharDB[key] == nil then
+            MyFeetHurtCharDB[key] = value
         end
     end
 
@@ -145,7 +152,7 @@ end
 
 -- On startup, reconcile any untracked gaps in stats
 local function ReconcileStats()
-    local db = MyFeetHurtDB
+    local db = MyFeetHurtCharDB
     local walkedGap = (db.milesWalked or 0) - ((db.milesWalkedAlive or 0) + (db.milesWalkedDead or 0))
     if walkedGap > 0 then
         db.milesWalkedAlive = (db.milesWalkedAlive or 0) + walkedGap
@@ -292,6 +299,24 @@ end
 -- Milestone Logic
 -- ============================================================
 
+-- Smallest number above m (and above 1000) whose digits are all the same, e.g. 1111, 2222, 33333
+local function GetNextRepdigit(m)
+    local ones = 1111
+    while true do
+        for d = 1, 9 do
+            local r = ones * d
+            if r > m then return r end
+        end
+        ones = ones * 10 + 1
+    end
+end
+
+-- Past 100: every 100, plus every repdigit over 1000 (1111, 2222, ... 11111, ...)
+local function GetNextLargeMilestone(m)
+    local nextHundred = math.floor(m / 100) * 100 + 100
+    return math.min(nextHundred, GetNextRepdigit(m))
+end
+
 local function GetNextMilestone(m)
     if m < 1 then return 1
     elseif m < 2 then return 2
@@ -304,7 +329,7 @@ local function GetNextMilestone(m)
     elseif m < 40 then return 40
     elseif m < 50 then return 50
     elseif m < 100 then return 100
-    else return m + 100 end
+    else return GetNextLargeMilestone(m) end
 end
 
 -- milestone key -> setting that toggles its notifications
@@ -326,7 +351,7 @@ local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, con
     local notify = (not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false)
         and IsSettingEnabled(MILESTONE_NOTIFY_SETTING[milestoneKey])
 
-    local lastM = MyFeetHurtDB[milestoneKey] or 0
+    local lastM = MyFeetHurtCharDB[milestoneKey] or 0
     local nextM = GetNextMilestone(lastM)
 
     while currentVal >= nextM do
@@ -345,14 +370,14 @@ local function CheckAndNotifyMilestones(milestoneKey, baseMiles, pastMethod, con
             PlaySound(5274, "Master")
         end
 
-        MyFeetHurtDB[milestoneKey] = nextM
+        MyFeetHurtCharDB[milestoneKey] = nextM
         lastM = nextM
         nextM = GetNextMilestone(lastM)
     end
 end
 
 local function CheckAllMilestones()
-    local db = MyFeetHurtDB
+    local db = MyFeetHurtCharDB
     CheckAndNotifyMilestones("walkedMilestone", db.milesWalked or 0, "walked", "walking")
     CheckAndNotifyMilestones("riddenMilestone", db.milesRidden or 0, "ridden", "riding")
     CheckAndNotifyMilestones("flownMilestone", db.milesFlown or 0, "flown", "flying")
@@ -364,7 +389,7 @@ local function CheckAllMilestones()
     CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
 end
 
--- Jump milestones: 10, 20, 30, 40, 50, 100, then every 100. Jumps are a plain count, so no unit conversion.
+-- Jump milestones: 10, 20, 30, 40, 50, 100, then every 100 plus repdigits over 1000. Jumps are a plain count, so no unit conversion.
 local function GetNextJumpMilestone(m)
     if m < 10 then return 10
     elseif m < 20 then return 20
@@ -372,14 +397,14 @@ local function GetNextJumpMilestone(m)
     elseif m < 40 then return 40
     elseif m < 50 then return 50
     elseif m < 100 then return 100
-    else return m + 100 end
+    else return GetNextLargeMilestone(m) end
 end
 
 local function CheckJumpMilestones()
     local notify = (not MyFeetHurtSettings or MyFeetHurtSettings.achievementNotifications ~= false)
         and IsSettingEnabled("notifyJumps")
-    local jumps = MyFeetHurtDB.jumps or 0
-    local lastM = MyFeetHurtDB.jumpsMilestone or 0
+    local jumps = MyFeetHurtCharDB.jumps or 0
+    local lastM = MyFeetHurtCharDB.jumpsMilestone or 0
     local nextM = GetNextJumpMilestone(lastM)
 
     while jumps >= nextM do
@@ -398,7 +423,7 @@ local function CheckJumpMilestones()
             PlaySound(5274, "Master")
         end
 
-        MyFeetHurtDB.jumpsMilestone = nextM
+        MyFeetHurtCharDB.jumpsMilestone = nextM
         lastM = nextM
         nextM = GetNextJumpMilestone(lastM)
     end
@@ -473,7 +498,7 @@ local function RecalculateGlobalValues()
         return
     end
 
-    local db = MyFeetHurtDB
+    local db = MyFeetHurtCharDB
 
     local travelledTotal = (db.milesWalked or 0) + (db.milesRidden or 0) + (db.milesFlown or 0) + (db.milesBoats or 0) + (db.milesSwum or 0) + (db.milesAirborne or 0)
 
@@ -738,7 +763,7 @@ local function CreateMyFeetHurtUI()
     minimapButton:SetScript("OnEnter", function(self)
         if isDragging then return end
 
-        local db = MyFeetHurtDB
+        local db = MyFeetHurtCharDB
 
         local walkedTotal     = (db.milesWalked or 0)
         local walkedAlive     = (db.milesWalkedAlive or 0)
@@ -840,8 +865,8 @@ local function SetUseKm(useKm)
 
     local ratio = useKm and MILES_TO_KM or (1 / MILES_TO_KM)
     for _, key in ipairs({"walkedMilestone", "riddenMilestone", "flownMilestone", "boatsMilestone", "swumMilestone", "airborneMilestone", "travelledMilestone"}) do
-        if MyFeetHurtDB[key] and MyFeetHurtDB[key] > 0 then
-            MyFeetHurtDB[key] = MyFeetHurtDB[key] * ratio
+        if MyFeetHurtCharDB[key] and MyFeetHurtCharDB[key] > 0 then
+            MyFeetHurtCharDB[key] = MyFeetHurtCharDB[key] * ratio
         end
     end
 
@@ -850,7 +875,7 @@ end
 
 local function ResetAllStats()
     for key, value in pairs(DEFAULT_DB) do
-        MyFeetHurtDB[key] = value
+        MyFeetHurtCharDB[key] = value
     end
     RecalculateGlobalValues()
     print("|cFFFF0000[MyFeetHurt] All stats and milestones have been reset to 0!|r")
@@ -1114,11 +1139,11 @@ end
 -- Jump counter: counts a jump only when the jump key is pressed on the ground (not while
 -- falling, swimming, flying, on a taxi, or in combat). Only counts while enabled.
 hooksecurefunc("JumpOrAscendStart", function()
-    if not MyFeetHurtDB or not MyFeetHurtSettings then return end
+    if not MyFeetHurtCharDB or not MyFeetHurtSettings then return end
     if not (MyFeetHurtSettings.showJumps or MyFeetHurtSettings.tipJumps) then return end
     if InCombatLockdown() then return end
     if IsFalling() or IsSwimming() or IsFlying() or UnitOnTaxi("player") then return end
-    MyFeetHurtDB.jumps = (MyFeetHurtDB.jumps or 0) + 1
+    MyFeetHurtCharDB.jumps = (MyFeetHurtCharDB.jumps or 0) + 1
     CheckJumpMilestones()
     uiDirty = true
 end)
@@ -1127,7 +1152,7 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
     lastUpdate = lastUpdate + elapsed
     if lastUpdate < updateInterval then return end
 
-    if not MyFeetHurtDB then
+    if not MyFeetHurtCharDB then
         InitializeSavedVariables()
     end
 
@@ -1203,8 +1228,8 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                 end
 
                 if isOnTaxi then
-                    MyFeetHurtDB.milesFlown = (MyFeetHurtDB.milesFlown or 0) + distanceMiles
-                    CheckAndNotifyMilestones("flownMilestone", MyFeetHurtDB.milesFlown, "flown", "flying")
+                    MyFeetHurtCharDB.milesFlown = (MyFeetHurtCharDB.milesFlown or 0) + distanceMiles
+                    CheckAndNotifyMilestones("flownMilestone", MyFeetHurtCharDB.milesFlown, "flown", "flying")
                 
                 elseif isOnBoatState then
                     -- Standing still on the transport: our displacement is purely the transport's speed, so sample it
@@ -1218,95 +1243,95 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                         boatDistanceMiles = boatSpeedEstimate * lastUpdate * YARDS_TO_MILES
                     end
 
-                    MyFeetHurtDB.milesBoats = (MyFeetHurtDB.milesBoats or 0) + boatDistanceMiles
+                    MyFeetHurtCharDB.milesBoats = (MyFeetHurtCharDB.milesBoats or 0) + boatDistanceMiles
                     if UnitIsDeadOrGhost("player") then
-                        MyFeetHurtDB.milesBoatsDead = (MyFeetHurtDB.milesBoatsDead or 0) + boatDistanceMiles
+                        MyFeetHurtCharDB.milesBoatsDead = (MyFeetHurtCharDB.milesBoatsDead or 0) + boatDistanceMiles
                     else
-                        MyFeetHurtDB.milesBoatsAlive = (MyFeetHurtDB.milesBoatsAlive or 0) + boatDistanceMiles
+                        MyFeetHurtCharDB.milesBoatsAlive = (MyFeetHurtCharDB.milesBoatsAlive or 0) + boatDistanceMiles
                     end
-                    CheckAndNotifyMilestones("boatsMilestone", MyFeetHurtDB.milesBoats, "used public transportation", "traveling via public transport")
+                    CheckAndNotifyMilestones("boatsMilestone", MyFeetHurtCharDB.milesBoats, "used public transportation", "traveling via public transport")
 
                     if isAirborneNow then
                         -- Jumping on public transport: count the jump as Airborne alongside the boat distance
                         local airDistanceMiles = ((legSpeed and legSpeed > 0) and legSpeed or 7.0) * lastUpdate * YARDS_TO_MILES
-                        MyFeetHurtDB.milesAirborne = (MyFeetHurtDB.milesAirborne or 0) + airDistanceMiles
+                        MyFeetHurtCharDB.milesAirborne = (MyFeetHurtCharDB.milesAirborne or 0) + airDistanceMiles
                         if UnitIsDeadOrGhost("player") then
-                            MyFeetHurtDB.milesAirborneDead = (MyFeetHurtDB.milesAirborneDead or 0) + airDistanceMiles
+                            MyFeetHurtCharDB.milesAirborneDead = (MyFeetHurtCharDB.milesAirborneDead or 0) + airDistanceMiles
                         else
-                            MyFeetHurtDB.milesAirborneAlive = (MyFeetHurtDB.milesAirborneAlive or 0) + airDistanceMiles
+                            MyFeetHurtCharDB.milesAirborneAlive = (MyFeetHurtCharDB.milesAirborneAlive or 0) + airDistanceMiles
                         end
                         if IsMounted() then
-                            MyFeetHurtDB.milesAirborneMounted = (MyFeetHurtDB.milesAirborneMounted or 0) + airDistanceMiles
+                            MyFeetHurtCharDB.milesAirborneMounted = (MyFeetHurtCharDB.milesAirborneMounted or 0) + airDistanceMiles
                         else
-                            MyFeetHurtDB.milesAirborneUnmounted = (MyFeetHurtDB.milesAirborneUnmounted or 0) + airDistanceMiles
+                            MyFeetHurtCharDB.milesAirborneUnmounted = (MyFeetHurtCharDB.milesAirborneUnmounted or 0) + airDistanceMiles
                         end
-                        CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
+                        CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtCharDB.milesAirborne, "been airborne", "jumping and falling")
                     elseif isWalking then
                         local legDistanceMiles = (legSpeed and (legSpeed * lastUpdate) or distanceYards) * YARDS_TO_MILES
                         
                         if IsMounted() then
-                            MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + legDistanceMiles
-                            CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+                            MyFeetHurtCharDB.milesRidden = (MyFeetHurtCharDB.milesRidden or 0) + legDistanceMiles
+                            CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtCharDB.milesRidden, "ridden", "riding")
                         else
-                            MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + legDistanceMiles
+                            MyFeetHurtCharDB.milesWalked = (MyFeetHurtCharDB.milesWalked or 0) + legDistanceMiles
                             if UnitIsDeadOrGhost("player") then
-                                MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + legDistanceMiles
+                                MyFeetHurtCharDB.milesWalkedDead = (MyFeetHurtCharDB.milesWalkedDead or 0) + legDistanceMiles
                             else
-                                MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + legDistanceMiles
+                                MyFeetHurtCharDB.milesWalkedAlive = (MyFeetHurtCharDB.milesWalkedAlive or 0) + legDistanceMiles
                             end
-                            CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
+                            CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtCharDB.milesWalked, "walked", "walking")
                         end
                     end
 
                 elseif isSwimming then
-                    MyFeetHurtDB.milesSwum = (MyFeetHurtDB.milesSwum or 0) + distanceMiles
+                    MyFeetHurtCharDB.milesSwum = (MyFeetHurtCharDB.milesSwum or 0) + distanceMiles
                     if IsMounted() then
-                        MyFeetHurtDB.milesSwumMounted = (MyFeetHurtDB.milesSwumMounted or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesSwumMounted = (MyFeetHurtCharDB.milesSwumMounted or 0) + distanceMiles
                     else
-                        MyFeetHurtDB.milesSwumUnmounted = (MyFeetHurtDB.milesSwumUnmounted or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesSwumUnmounted = (MyFeetHurtCharDB.milesSwumUnmounted or 0) + distanceMiles
                         if UnitIsDeadOrGhost("player") then
-                            MyFeetHurtDB.milesSwumUnmountedDead = (MyFeetHurtDB.milesSwumUnmountedDead or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesSwumUnmountedDead = (MyFeetHurtCharDB.milesSwumUnmountedDead or 0) + distanceMiles
                         else
-                            MyFeetHurtDB.milesSwumUnmountedAlive = (MyFeetHurtDB.milesSwumUnmountedAlive or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesSwumUnmountedAlive = (MyFeetHurtCharDB.milesSwumUnmountedAlive or 0) + distanceMiles
                         end
                     end
-                    CheckAndNotifyMilestones("swumMilestone", MyFeetHurtDB.milesSwum, "swum", "swimming")
+                    CheckAndNotifyMilestones("swumMilestone", MyFeetHurtCharDB.milesSwum, "swum", "swimming")
 
                 elseif isFlying then
-                    MyFeetHurtDB.milesFlown = (MyFeetHurtDB.milesFlown or 0) + distanceMiles
-                    CheckAndNotifyMilestones("flownMilestone", MyFeetHurtDB.milesFlown, "flown", "flying")
+                    MyFeetHurtCharDB.milesFlown = (MyFeetHurtCharDB.milesFlown or 0) + distanceMiles
+                    CheckAndNotifyMilestones("flownMilestone", MyFeetHurtCharDB.milesFlown, "flown", "flying")
 
                 else
                     if not isAirborneNow then
                         if IsMounted() then
-                            MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + distanceMiles
-                            CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+                            MyFeetHurtCharDB.milesRidden = (MyFeetHurtCharDB.milesRidden or 0) + distanceMiles
+                            CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtCharDB.milesRidden, "ridden", "riding")
                         else
-                            MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesWalked = (MyFeetHurtCharDB.milesWalked or 0) + distanceMiles
                             if UnitIsDeadOrGhost("player") then
-                                MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + distanceMiles
+                                MyFeetHurtCharDB.milesWalkedDead = (MyFeetHurtCharDB.milesWalkedDead or 0) + distanceMiles
                             else
-                                MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                                MyFeetHurtCharDB.milesWalkedAlive = (MyFeetHurtCharDB.milesWalkedAlive or 0) + distanceMiles
                             end
-                            CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
+                            CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtCharDB.milesWalked, "walked", "walking")
                         end
                     else
-                        MyFeetHurtDB.milesAirborne = (MyFeetHurtDB.milesAirborne or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesAirborne = (MyFeetHurtCharDB.milesAirborne or 0) + distanceMiles
                         if UnitIsDeadOrGhost("player") then
-                            MyFeetHurtDB.milesAirborneDead = (MyFeetHurtDB.milesAirborneDead or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesAirborneDead = (MyFeetHurtCharDB.milesAirborneDead or 0) + distanceMiles
                         else
-                            MyFeetHurtDB.milesAirborneAlive = (MyFeetHurtDB.milesAirborneAlive or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesAirborneAlive = (MyFeetHurtCharDB.milesAirborneAlive or 0) + distanceMiles
                         end
                         if IsMounted() then
-                            MyFeetHurtDB.milesAirborneMounted = (MyFeetHurtDB.milesAirborneMounted or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesAirborneMounted = (MyFeetHurtCharDB.milesAirborneMounted or 0) + distanceMiles
                         else
-                            MyFeetHurtDB.milesAirborneUnmounted = (MyFeetHurtDB.milesAirborneUnmounted or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesAirborneUnmounted = (MyFeetHurtCharDB.milesAirborneUnmounted or 0) + distanceMiles
                         end
-                        CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
+                        CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtCharDB.milesAirborne, "been airborne", "jumping and falling")
                     end
                 end
 
-                local totalBaseMiles = (MyFeetHurtDB.milesWalked or 0) + (MyFeetHurtDB.milesRidden or 0) + (MyFeetHurtDB.milesFlown or 0) + (MyFeetHurtDB.milesBoats or 0) + (MyFeetHurtDB.milesSwum or 0) + (MyFeetHurtDB.milesAirborne or 0)
+                local totalBaseMiles = (MyFeetHurtCharDB.milesWalked or 0) + (MyFeetHurtCharDB.milesRidden or 0) + (MyFeetHurtCharDB.milesFlown or 0) + (MyFeetHurtCharDB.milesBoats or 0) + (MyFeetHurtCharDB.milesSwum or 0) + (MyFeetHurtCharDB.milesAirborne or 0)
                 CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
 
                 uiDirty = true
@@ -1323,48 +1348,48 @@ distanceTracker:SetScript("OnUpdate", function(self, elapsed)
                 local distanceMiles = (fallbackSpeed * lastUpdate) * YARDS_TO_MILES
                 
                 if isSwimming then
-                    MyFeetHurtDB.milesSwum = (MyFeetHurtDB.milesSwum or 0) + distanceMiles
+                    MyFeetHurtCharDB.milesSwum = (MyFeetHurtCharDB.milesSwum or 0) + distanceMiles
                     if IsMounted() then
-                        MyFeetHurtDB.milesSwumMounted = (MyFeetHurtDB.milesSwumMounted or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesSwumMounted = (MyFeetHurtCharDB.milesSwumMounted or 0) + distanceMiles
                     else
-                        MyFeetHurtDB.milesSwumUnmounted = (MyFeetHurtDB.milesSwumUnmounted or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesSwumUnmounted = (MyFeetHurtCharDB.milesSwumUnmounted or 0) + distanceMiles
                         if UnitIsDeadOrGhost("player") then
-                            MyFeetHurtDB.milesSwumUnmountedDead = (MyFeetHurtDB.milesSwumUnmountedDead or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesSwumUnmountedDead = (MyFeetHurtCharDB.milesSwumUnmountedDead or 0) + distanceMiles
                         else
-                            MyFeetHurtDB.milesSwumUnmountedAlive = (MyFeetHurtDB.milesSwumUnmountedAlive or 0) + distanceMiles
+                            MyFeetHurtCharDB.milesSwumUnmountedAlive = (MyFeetHurtCharDB.milesSwumUnmountedAlive or 0) + distanceMiles
                         end
                     end
-                    CheckAndNotifyMilestones("swumMilestone", MyFeetHurtDB.milesSwum, "swum", "swimming")
+                    CheckAndNotifyMilestones("swumMilestone", MyFeetHurtCharDB.milesSwum, "swum", "swimming")
                 
                 elseif isAirborneNow then
-                    MyFeetHurtDB.milesAirborne = (MyFeetHurtDB.milesAirborne or 0) + distanceMiles
+                    MyFeetHurtCharDB.milesAirborne = (MyFeetHurtCharDB.milesAirborne or 0) + distanceMiles
                     if UnitIsDeadOrGhost("player") then
-                        MyFeetHurtDB.milesAirborneDead = (MyFeetHurtDB.milesAirborneDead or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesAirborneDead = (MyFeetHurtCharDB.milesAirborneDead or 0) + distanceMiles
                     else
-                        MyFeetHurtDB.milesAirborneAlive = (MyFeetHurtDB.milesAirborneAlive or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesAirborneAlive = (MyFeetHurtCharDB.milesAirborneAlive or 0) + distanceMiles
                     end
                     if IsMounted() then
-                        MyFeetHurtDB.milesAirborneMounted = (MyFeetHurtDB.milesAirborneMounted or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesAirborneMounted = (MyFeetHurtCharDB.milesAirborneMounted or 0) + distanceMiles
                     else
-                        MyFeetHurtDB.milesAirborneUnmounted = (MyFeetHurtDB.milesAirborneUnmounted or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesAirborneUnmounted = (MyFeetHurtCharDB.milesAirborneUnmounted or 0) + distanceMiles
                     end
-                    CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtDB.milesAirborne, "been airborne", "jumping and falling")
+                    CheckAndNotifyMilestones("airborneMilestone", MyFeetHurtCharDB.milesAirborne, "been airborne", "jumping and falling")
                 
                 elseif IsMounted() then
-                    MyFeetHurtDB.milesRidden = (MyFeetHurtDB.milesRidden or 0) + distanceMiles
-                    CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtDB.milesRidden, "ridden", "riding")
+                    MyFeetHurtCharDB.milesRidden = (MyFeetHurtCharDB.milesRidden or 0) + distanceMiles
+                    CheckAndNotifyMilestones("riddenMilestone", MyFeetHurtCharDB.milesRidden, "ridden", "riding")
                 
                 else
-                    MyFeetHurtDB.milesWalked = (MyFeetHurtDB.milesWalked or 0) + distanceMiles
+                    MyFeetHurtCharDB.milesWalked = (MyFeetHurtCharDB.milesWalked or 0) + distanceMiles
                     if UnitIsDeadOrGhost("player") then
-                        MyFeetHurtDB.milesWalkedDead = (MyFeetHurtDB.milesWalkedDead or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesWalkedDead = (MyFeetHurtCharDB.milesWalkedDead or 0) + distanceMiles
                     else
-                        MyFeetHurtDB.milesWalkedAlive = (MyFeetHurtDB.milesWalkedAlive or 0) + distanceMiles
+                        MyFeetHurtCharDB.milesWalkedAlive = (MyFeetHurtCharDB.milesWalkedAlive or 0) + distanceMiles
                     end
-                    CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtDB.milesWalked, "walked", "walking")
+                    CheckAndNotifyMilestones("walkedMilestone", MyFeetHurtCharDB.milesWalked, "walked", "walking")
                 end
 
-                local totalBaseMiles = (MyFeetHurtDB.milesWalked or 0) + (MyFeetHurtDB.milesRidden or 0) + (MyFeetHurtDB.milesFlown or 0) + (MyFeetHurtDB.milesBoats or 0) + (MyFeetHurtDB.milesSwum or 0) + (MyFeetHurtDB.milesAirborne or 0)
+                local totalBaseMiles = (MyFeetHurtCharDB.milesWalked or 0) + (MyFeetHurtCharDB.milesRidden or 0) + (MyFeetHurtCharDB.milesFlown or 0) + (MyFeetHurtCharDB.milesBoats or 0) + (MyFeetHurtCharDB.milesSwum or 0) + (MyFeetHurtCharDB.milesAirborne or 0)
                 CheckAndNotifyMilestones("travelledMilestone", totalBaseMiles, "travelled", "travelling")
 
                 uiDirty = true
